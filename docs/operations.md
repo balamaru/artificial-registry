@@ -6,7 +6,7 @@ Semua fitur implementasi ini tersedia tanpa license key. Core service 2 (runtime
 
 `AUTH_MODE=local` adalah default. UI awal menampilkan registrasi dengan email, username, dan password. Username mengikuti `[a-z][a-z0-9-]{0,62}`, password 12–72 byte. Password disimpan menggunakan bcrypt cost 12; token sesi acak disimpan sebagai SHA-256 dalam database, berlaku 24 jam, dan dicabut saat logout. Cookie memakai HttpOnly dan SameSite=Lax; Secure aktif ketika `PUBLIC_URL` menggunakan HTTPS. Session tidak disimpan di localStorage.
 
-Registrasi terbuka untuk pengujian awal. Setelah semua pengguna terdaftar, set `REGISTRATION_ENABLED=false` untuk menutup registrasi baru; login akun yang sudah ada tetap berjalan. Akun tidak memperoleh akses ke namespace pengguna lain secara otomatis. Pembuat namespace menjadi admin. Admin dapat menambahkan anggota memakai subject ID yang ditampilkan di header UI. Role reader bisa membaca/download dan mengirim usage, publisher juga bisa upload, admin juga bisa review serta mengelola anggota. Pengguna tidak dapat mencabut atau menurunkan role admin dirinya sendiri.
+Registrasi terbuka untuk pengujian awal. Setelah semua pengguna terdaftar, set `REGISTRATION_ENABLED=false` untuk menutup registrasi baru; login akun yang sudah ada tetap berjalan. Akun pertama menjadi super-admin registry. Pada upgrade, akun lokal tertua dipromosikan dan membership lama dimigrasikan. Akun lainnya tidak memperoleh akses namespace secara otomatis. Super-admin dapat membuat user lewat Users & access, memberi role per namespace atau semua namespace, menonaktifkan akun, dan mereset password lokal. Pembuatan namespace memerlukan super-admin atau role admin dengan scope semua namespace; pembuat menjadi admin namespace tersebut. Admin namespace dapat menambahkan anggota memakai username, email, atau subject ID. Role namespace granular dan perilaku upgrade dijelaskan di [access-control.md](access-control.md). Pengguna tidak dapat mencabut atau menurunkan role admin dirinya sendiri.
 
 `PUBLIC_URL` harus sama persis dengan origin browser, tanpa trailing slash, misalnya `http://localhost:8080` atau `https://skills.example.com`. Mengakses via `127.0.0.1` membutuhkan nilai origin yang sesuai. Request mutasi yang memakai cookie harus menyertakan `X-Registry-CSRF: 1`; UI sudah melakukannya. Origin asing ditolak. Tidak ada CORS lintas origin. Endpoint login/register dibatasi bersama menjadi 20 percobaan per IP per 15 menit. Di belakang reverse proxy, alamat proxy yang digunakan; header X-Forwarded-For tidak dipercaya. Terapkan pembatasan per klien di ingress bila diperlukan.
 
@@ -54,7 +54,7 @@ go vet ./...
 TEST_DATABASE_URL='postgres://postgres:password@localhost:5432/registry_test?sslmode=disable' go test ./... -count=1
 ```
 
-Integration test membuat akun dan namespace unik pada database disposable. Test mencakup registrasi/login/logout, password hash, RBAC, integritas download, karantina/approve/reject/rescan, usage, audit, dan perubahan anggota. Unit test memakai mock OSV sehingga tidak bergantung internet. Unit test UI memeriksa file statis dan header keamanan. Script `scripts/ui-smoke.cjs` menguji browser Chromium: registrasi, namespace, upload, approve, integritas download, analytics, audit, anggota, layout mobile, logout/login, dan error JavaScript.
+Integration test membuat akun dan namespace unik pada database disposable; test RBAC memakai schema terisolasi yang dibersihkan sesudah test. Test mencakup registrasi/login/logout, password hash, RBAC, integritas download, karantina/approve/reject/rescan, usage, audit, dan perubahan anggota. Unit test memakai mock OSV sehingga tidak bergantung internet. Unit test UI memeriksa file statis dan header keamanan. Script `scripts/ui-smoke.cjs` menguji browser Chromium: registrasi, namespace, upload, approve, integritas download, analytics, audit, anggota, layout mobile, logout/login, dan error JavaScript.
 
 
 Menjalankan smoke test browser (aplikasi dan database disposable sudah berjalan):
@@ -66,7 +66,7 @@ NODE_PATH=/tmp/registry-browser/node_modules BASE_URL=http://localhost:8080 \
   ZIP_FIXTURE=/path/to/safe-skill.zip node scripts/ui-smoke.cjs
 ```
 
-`ZIP_FIXTURE` harus berisi SKILL.md aman di root. Opsional `SCREENSHOT_DIR` menunjuk direktori yang sudah ada untuk menyimpan screenshot desktop/mobile. Script membuat akun dan namespace baru pada setiap run. Aplikasi produksi tidak membutuhkan Node.js, npm, atau Chromium.
+`ZIP_FIXTURE` harus berisi SKILL.md aman di root. Opsional `SCREENSHOT_DIR` menunjuk direktori yang sudah ada untuk menyimpan screenshot desktop/mobile. Script membuat akun dan namespace baru, dan membutuhkan database kosong untuk bootstrap super-admin. Aplikasi produksi tidak membutuhkan Node.js, npm, atau Chromium.
 
 
 ## Build gagal saat download modul Go

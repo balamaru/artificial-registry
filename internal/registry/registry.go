@@ -113,7 +113,7 @@ func New(ctx context.Context) (*App, error) {
 		db.Close()
 		return nil, err
 	}
-	for _, statement := range strings.Split(schema+authSchema, ";") {
+	for _, statement := range strings.Split(schema+authSchema+rbacSchema, ";") {
 		if strings.TrimSpace(statement) == "" {
 			continue
 		}
@@ -164,28 +164,15 @@ func problem(w http.ResponseWriter, code int, msg string) {
 func validPath(r *http.Request) bool {
 	return identifier.MatchString(r.PathValue("ns")) && (r.PathValue("skill") == "" || identifier.MatchString(r.PathValue("skill")))
 }
-func (a *App) allowed(r *http.Request, u actor, minimum string) bool {
-	if !validPath(r) {
-		return false
-	}
-	var role string
-	err := a.db.QueryRow(r.Context(), "SELECT role FROM memberships WHERE namespace=$1 AND subject=$2", r.PathValue("ns"), u.Subject).Scan(&role)
-	if err != nil {
-		return false
-	}
-	if minimum == "reader" {
-		return true
-	}
-	if minimum == "publisher" {
-		return role == "publisher" || role == "admin"
-	}
-	return role == "admin"
-}
 func (a *App) log(ctx context.Context, u actor, action, ns, skill string, detail any) {
 	b, _ := json.Marshal(detail)
 	_, _ = a.db.Exec(ctx, "INSERT INTO audit(subject,action,namespace,skill,detail) VALUES($1,$2,$3,$4,$5)", u.Subject, action, ns, skill, b)
 }
 func (a *App) createNamespace(w http.ResponseWriter, r *http.Request, u actor) {
+	if !a.canCreateNamespace(r.Context(), u) {
+		problem(w, 403, "namespace creation requires super-admin or all-namespace admin")
+		return
+	}
 	var v struct {
 		Name string `json:"name"`
 	}
@@ -204,7 +191,7 @@ func (a *App) createNamespace(w http.ResponseWriter, r *http.Request, u actor) {
 		problem(w, 409, "namespace exists")
 		return
 	}
-	_, err = tx.Exec(r.Context(), "INSERT INTO memberships(namespace,subject,role) VALUES($1,$2,'admin')", v.Name, u.Subject)
+	_, err = tx.Exec(r.Context(), "INSERT INTO role_bindings(scope,subject,role) VALUES($1,$2,'admin')", v.Name, u.Subject)
 	if err != nil {
 		problem(w, 500, "database error")
 		return
@@ -219,26 +206,6 @@ func (a *App) createNamespace(w http.ResponseWriter, r *http.Request, u actor) {
 		return
 	}
 	respond(w, 201, v)
-}
-func (a *App) setMember(w http.ResponseWriter, r *http.Request, u actor) {
-	if !a.allowed(r, u, "admin") {
-		problem(w, 403, "forbidden")
-		return
-	}
-	var v struct {
-		Role string `json:"role"`
-	}
-	if json.NewDecoder(r.Body).Decode(&v) != nil || (v.Role != "reader" && v.Role != "publisher" && v.Role != "admin") || r.PathValue("sub") == "" || (r.PathValue("sub") == u.Subject && v.Role != "admin") {
-		problem(w, 400, "invalid member")
-		return
-	}
-	_, err := a.db.Exec(r.Context(), "INSERT INTO memberships(namespace,subject,role) VALUES($1,$2,$3) ON CONFLICT(namespace,subject) DO UPDATE SET role=EXCLUDED.role", r.PathValue("ns"), r.PathValue("sub"), v.Role)
-	if err != nil {
-		problem(w, 500, "database error")
-		return
-	}
-	a.log(r.Context(), u, "member.set", r.PathValue("ns"), "", map[string]string{"subject": r.PathValue("sub"), "role": v.Role})
-	w.WriteHeader(204)
 }
 func inspect(data []byte) (scanResult, error) {
 	z, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
@@ -331,7 +298,7 @@ func inspect(data []byte) (scanResult, error) {
 	return result, nil
 }
 func (a *App) upload(w http.ResponseWriter, r *http.Request, u actor) {
-	if !a.allowed(r, u, "publisher") {
+	if !a.allowed(r, u, "write") {
 		problem(w, 403, "forbidden")
 		return
 	}
@@ -366,11 +333,11 @@ func (a *App) upload(w http.ResponseWriter, r *http.Request, u actor) {
 	respond(w, 201, map[string]any{"status": status, "sha256": digest, "scan": scan})
 }
 func (a *App) list(w http.ResponseWriter, r *http.Request, u actor) {
-	if !a.allowed(r, u, "reader") {
+	if !a.allowed(r, u, "list") {
 		problem(w, 403, "forbidden")
 		return
 	}
-	rows, err := a.db.Query(r.Context(), "SELECT name,version,sha256,status,scan,created_at FROM skills WHERE namespace=$1 AND ($2='' OR name ILIKE '%'||$2||'%') AND ($3='' OR status=$3) ORDER BY created_at DESC,name,version LIMIT $4 OFFSET $5", r.PathValue("ns"), r.URL.Query().Get("q"), r.URL.Query().Get("status"), pageLimit(r), pageOffset(r))
+	rows, err := a.db.Query(r.Context(), "SELECT name,version,sha256,status,scan,created_at,updated_at,revision FROM skills WHERE namespace=$1 AND ($2='' OR name ILIKE '%'||$2||'%') AND ($3='' OR status=$3) ORDER BY created_at DESC,name,version LIMIT $4 OFFSET $5", r.PathValue("ns"), r.URL.Query().Get("q"), r.URL.Query().Get("status"), pageLimit(r), pageOffset(r))
 	if err != nil {
 		problem(w, 500, "database error")
 		return
@@ -380,12 +347,13 @@ func (a *App) list(w http.ResponseWriter, r *http.Request, u actor) {
 	for rows.Next() {
 		var name, ver, hash, status string
 		var scan json.RawMessage
-		var at time.Time
-		if rows.Scan(&name, &ver, &hash, &status, &scan, &at) != nil {
+		var at, updated time.Time
+		var revision int
+		if rows.Scan(&name, &ver, &hash, &status, &scan, &at, &updated, &revision) != nil {
 			problem(w, 500, "database error")
 			return
 		}
-		items = append(items, map[string]any{"name": name, "version": ver, "sha256": hash, "status": status, "scan": scan, "created_at": at})
+		items = append(items, map[string]any{"name": name, "version": ver, "sha256": hash, "status": status, "scan": scan, "created_at": at, "updated_at": updated, "revision": revision})
 	}
 	if rows.Err() != nil {
 		problem(w, 500, "database error")
@@ -394,7 +362,7 @@ func (a *App) list(w http.ResponseWriter, r *http.Request, u actor) {
 	respond(w, 200, items)
 }
 func (a *App) download(w http.ResponseWriter, r *http.Request, u actor) {
-	if !a.allowed(r, u, "reader") {
+	if !a.allowed(r, u, "read") {
 		problem(w, 403, "forbidden")
 		return
 	}
@@ -412,7 +380,7 @@ func (a *App) download(w http.ResponseWriter, r *http.Request, u actor) {
 	a.log(r.Context(), u, "skill.download", r.PathValue("ns"), r.PathValue("skill"), map[string]string{"version": r.PathValue("version")})
 }
 func (a *App) approve(w http.ResponseWriter, r *http.Request, u actor) {
-	if !a.allowed(r, u, "admin") {
+	if !a.allowed(r, u, "review") {
 		problem(w, 403, "forbidden")
 		return
 	}
@@ -429,7 +397,7 @@ func (a *App) approve(w http.ResponseWriter, r *http.Request, u actor) {
 	w.WriteHeader(204)
 }
 func (a *App) audit(w http.ResponseWriter, r *http.Request, u actor) {
-	if !a.allowed(r, u, "admin") {
+	if !(r.PathValue("ns") == "*" && a.systemAdmin(r.Context(), u)) && !a.allowed(r, u, "audit") {
 		problem(w, 403, "forbidden")
 		return
 	}
@@ -458,7 +426,7 @@ func (a *App) audit(w http.ResponseWriter, r *http.Request, u actor) {
 	respond(w, 200, items)
 }
 func (a *App) recordUsage(w http.ResponseWriter, r *http.Request, u actor) {
-	if !a.allowed(r, u, "reader") {
+	if !a.allowed(r, u, "usage-write") {
 		problem(w, 403, "forbidden")
 		return
 	}
@@ -488,7 +456,7 @@ func (a *App) recordUsage(w http.ResponseWriter, r *http.Request, u actor) {
 	w.WriteHeader(204)
 }
 func (a *App) usage(w http.ResponseWriter, r *http.Request, u actor) {
-	if !a.allowed(r, u, "admin") {
+	if !a.allowed(r, u, "usage-read") {
 		problem(w, 403, "forbidden")
 		return
 	}

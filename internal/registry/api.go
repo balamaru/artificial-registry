@@ -33,6 +33,15 @@ func (a *App) routes(m *http.ServeMux) {
 	m.HandleFunc("DELETE /v1/namespaces/{ns}/members/{sub}", a.auth(a.removeMember))
 	m.HandleFunc("POST /v1/namespaces/{ns}/skills/{skill}/versions/{version}/reject", a.auth(a.reject))
 	m.HandleFunc("POST /v1/namespaces/{ns}/skills/{skill}/versions/{version}/rescan", a.auth(a.rescan))
+	m.HandleFunc("GET /v1/roles", a.auth(a.roleCatalog))
+	m.HandleFunc("GET /v1/admin/users", a.auth(a.listUsers))
+	m.HandleFunc("POST /v1/admin/users", a.auth(a.createUser))
+	m.HandleFunc("PATCH /v1/admin/users/{sub}", a.auth(a.updateUser))
+	m.HandleFunc("PUT /v1/admin/users/{sub}/grants", a.auth(a.userGrants))
+	m.HandleFunc("GET /v1/admin/audit", a.auth(func(w http.ResponseWriter, r *http.Request, u actor) { r.SetPathValue("ns", "*"); a.audit(w, r, u) }))
+	m.HandleFunc("PUT /v1/namespaces/{ns}/skills/{skill}/versions/{version}", a.auth(a.updateSkill))
+	m.HandleFunc("DELETE /v1/namespaces/{ns}/skills/{skill}/versions/{version}", a.auth(a.deleteSkill))
+	m.HandleFunc("DELETE /v1/namespaces/{ns}/skills/{skill}", a.auth(a.deleteSkill))
 	files, _ := fs.Sub(web, "web")
 	m.Handle("GET /", http.FileServer(http.FS(files)))
 }
@@ -50,56 +59,8 @@ func pageOffset(r *http.Request) int {
 	}
 	return n
 }
-func (a *App) namespaces(w http.ResponseWriter, r *http.Request, u actor) {
-	rows, err := a.db.Query(r.Context(), "SELECT namespace,role FROM memberships WHERE subject=$1 ORDER BY namespace", u.Subject)
-	if err != nil {
-		problem(w, 500, "database error")
-		return
-	}
-	defer rows.Close()
-	items := []any{}
-	for rows.Next() {
-		var ns, role string
-		if rows.Scan(&ns, &role) != nil {
-			problem(w, 500, "database error")
-			return
-		}
-		items = append(items, map[string]string{"name": ns, "role": role})
-	}
-	if rows.Err() != nil {
-		problem(w, 500, "database error")
-		return
-	}
-	respond(w, 200, items)
-}
-func (a *App) members(w http.ResponseWriter, r *http.Request, u actor) {
-	if !a.allowed(r, u, "admin") {
-		problem(w, 403, "forbidden")
-		return
-	}
-	rows, err := a.db.Query(r.Context(), "SELECT m.subject,m.role,COALESCE(u.username,'') FROM memberships m LEFT JOIN users u ON u.subject=m.subject WHERE namespace=$1 ORDER BY m.subject", r.PathValue("ns"))
-	if err != nil {
-		problem(w, 500, "database error")
-		return
-	}
-	defer rows.Close()
-	items := []any{}
-	for rows.Next() {
-		var sub, role, name string
-		if rows.Scan(&sub, &role, &name) != nil {
-			problem(w, 500, "database error")
-			return
-		}
-		items = append(items, map[string]string{"subject": sub, "role": role, "username": name})
-	}
-	if rows.Err() != nil {
-		problem(w, 500, "database error")
-		return
-	}
-	respond(w, 200, items)
-}
 func (a *App) removeMember(w http.ResponseWriter, r *http.Request, u actor) {
-	if !a.allowed(r, u, "admin") {
+	if !a.allowed(r, u, "members") {
 		problem(w, 403, "forbidden")
 		return
 	}
@@ -107,7 +68,7 @@ func (a *App) removeMember(w http.ResponseWriter, r *http.Request, u actor) {
 		problem(w, 409, "cannot remove yourself")
 		return
 	}
-	_, err := a.db.Exec(r.Context(), "DELETE FROM memberships WHERE namespace=$1 AND subject=$2", r.PathValue("ns"), r.PathValue("sub"))
+	_, err := a.db.Exec(r.Context(), "DELETE FROM role_bindings WHERE scope=$1 AND subject=$2", r.PathValue("ns"), r.PathValue("sub"))
 	if err != nil {
 		problem(w, 500, "database error")
 		return
@@ -116,7 +77,7 @@ func (a *App) removeMember(w http.ResponseWriter, r *http.Request, u actor) {
 	w.WriteHeader(204)
 }
 func (a *App) reject(w http.ResponseWriter, r *http.Request, u actor) {
-	if !a.allowed(r, u, "admin") {
+	if !a.allowed(r, u, "review") {
 		problem(w, 403, "forbidden")
 		return
 	}
@@ -138,7 +99,7 @@ func (a *App) reject(w http.ResponseWriter, r *http.Request, u actor) {
 	w.WriteHeader(204)
 }
 func (a *App) rescan(w http.ResponseWriter, r *http.Request, u actor) {
-	if !a.allowed(r, u, "admin") {
+	if !a.allowed(r, u, "review") {
 		problem(w, 403, "forbidden")
 		return
 	}

@@ -6,12 +6,12 @@ Registry privat AI skill dalam satu layanan Go dengan PostgreSQL.
 
 1. Salin `.env.example` menjadi `.env`, lalu ganti `POSTGRES_PASSWORD` dengan password acak (gunakan karakter URL-safe).
 2. Jalankan `docker compose up --build`.
-3. Buka **http://localhost:8080**. Registrasi dengan **email, username, dan password** (minimal 12 karakter), lalu buat namespace pertama.
+3. Buka **http://localhost:8080**. Registrasi dengan **email, username, dan password** (minimal 12 karakter), Akun pertama otomatis menjadi **super-admin**, lalu dapat membuat namespace dan menambahkan user melalui **Users & access**.
 4. Upload ZIP dengan `SKILL.md` di root. Tinjau hasil scan, approve versi yang bersih, lalu unduh dari UI.
 
 Semua fitur yang tersedia gratis tanpa license key: core service **1** (scan statis/prompt, advisori dependency, trust score) dan **3** (telemetry, analytics, estimasi savings). Core service **2** (runtime sandbox) dikecualikan.
 
-UI mencakup pencarian/filter/pagination skill, hasil scan, approve/reject/rescan, namespace, anggota/RBAC, analytics, audit, dan logout. Tidak membutuhkan Node.js atau CDN. Data disimpan di PostgreSQL.
+UI mencakup pencarian/filter/pagination skill, hasil scan, approve/reject/rescan, namespace, anggota/RBAC, administrasi user, role per namespace/semua namespace, update/delete skill, analytics, audit, dan logout. Tidak membutuhkan Node.js atau CDN. Data disimpan di PostgreSQL.
 
 Default `AUTH_MODE=local`. Gunakan `hybrid` untuk login lokal + SSO atau `oidc` untuk SSO saja. Isi `OIDC_ISSUER`, `OIDC_CLIENT_ID`, opsional `OIDC_CLIENT_SECRET` dan `OIDC_AUDIENCE`. Callback: `${PUBLIC_URL}/auth/oidc/callback`. Keycloak dan provider OIDC kompatibel lainnya didukung. Panduan konfigurasi, keamanan, dan pengujian: [docs/operations.md](docs/operations.md).
 
@@ -29,24 +29,40 @@ curl -b cookies.txt -H 'X-Registry-CSRF: 1' -H 'Content-Type: application/json' 
 
 Untuk script lama, mode `dev` tetap mendukung `Authorization: Bearer $DEV_TOKEN`, jika token minimal 24 karakter dikonfigurasi. Mode ini hanya untuk pengujian lokal. Mode OIDC/hybrid mendukung bearer token provider dengan audience yang sesuai.
 
+## Administrasi user dan akses
+
+Super-admin dapat menambah user dengan email, username, password; mengatur role registry; menonaktifkan akun; mereset password lokal; serta memberikan role per namespace atau `*` (semua namespace saat ini dan yang dibuat kemudian). Pembuatan user tidak mengganti sesi admin. Pada upgrade, akun lokal tertua menjadi super-admin dan membership lama dimigrasikan otomatis. Backup PostgreSQL sebelum upgrade.
+
+Role namespace: **read-only**, **write-only**, **read-write**, **update**, **delete**, **reviewer**, **auditor**, **maintainer**, **admin**. Beberapa role dapat digabungkan. Admin namespace tidak otomatis menjadi super-admin. Role lama `reader`/`publisher` tetap didukung. Lihat [matriks izin dan panduan upgrade](docs/access-control.md).
+
+Update ZIP memakai `PUT` pada URL versi dengan header `If-Match: <sha256 saat ini>`; hasilnya di-scan ulang dan kembali ke karantina. Delete versi juga membutuhkan `If-Match`. Paket dapat dihapus, tetapi audit dan histori usage tetap disimpan.
+
 ## API
 
 | Method dan path | Akses | Fungsi |
 | --- | --- | --- |
+| `GET/POST /v1/admin/users` | Super-admin | Daftar/buat user |
+| `PATCH /v1/admin/users/{sub}` | Super-admin | Ubah role registry, status akun, atau password |
+| `PUT /v1/admin/users/{sub}/grants` | Super-admin | Ganti semua grant namespace user |
+| `GET /v1/admin/audit` | Super-admin | Audit administrasi user |
+| `GET /v1/roles` | Pengguna login | Katalog role dan izin |
+| `PUT /v1/namespaces/{ns}/skills/{skill}/versions/{version}` | Izin update | Ganti ZIP dan karantina ulang |
+| `DELETE /v1/namespaces/{ns}/skills/{skill}/versions/{version}` | Izin delete | Hapus satu versi |
+| `DELETE /v1/namespaces/{ns}/skills/{skill}` | Izin delete | Hapus versi skill yang ada saat operasi dimulai |
 | `GET /v1/namespaces` | Pengguna login | Daftar namespace dan role |
-| `POST /v1/namespaces` | Pengguna login | Buat namespace dan menjadi admin |
-| `PUT /v1/namespaces/{ns}/members/{sub}` | Admin | Atur role `reader`, `publisher`, atau `admin` |
-| `POST /v1/namespaces/{ns}/skills/{skill}/versions/{version}` | Publisher | Upload ZIP, scan, karantina |
-| `POST /v1/namespaces/{ns}/skills/{skill}/versions/{version}/approve` | Admin | Publikasikan jika scan tanpa temuan |
-| `GET /v1/namespaces/{ns}/skills` | Anggota | Daftar versi dan hasil scan |
-| `GET /v1/namespaces/{ns}/skills/{skill}/versions/{version}` | Anggota | Unduh versi published |
-| `POST /v1/namespaces/{ns}/skills/{skill}/versions/{version}/reject` | Admin | Tolak/cabut versi dengan alasan |
-| `POST /v1/namespaces/{ns}/skills/{skill}/versions/{version}/rescan` | Admin | Scan ulang dan karantina kembali |
+| `POST /v1/namespaces` | Super-admin / admin semua namespace | Buat namespace dan menjadi admin |
+| `PUT /v1/namespaces/{ns}/members/{sub}` | Admin | Atur satu atau beberapa role namespace |
+| `POST /v1/namespaces/{ns}/skills/{skill}/versions/{version}` | Izin write | Upload ZIP, scan, karantina |
+| `POST /v1/namespaces/{ns}/skills/{skill}/versions/{version}/approve` | Izin review | Publikasikan jika scan tanpa temuan |
+| `GET /v1/namespaces/{ns}/skills` | Izin list | Daftar versi dan hasil scan |
+| `GET /v1/namespaces/{ns}/skills/{skill}/versions/{version}` | Izin read | Unduh versi published |
+| `POST /v1/namespaces/{ns}/skills/{skill}/versions/{version}/reject` | Izin review | Tolak/cabut versi dengan alasan |
+| `POST /v1/namespaces/{ns}/skills/{skill}/versions/{version}/rescan` | Izin review | Scan ulang dan karantina kembali |
 | `GET /v1/namespaces/{ns}/members` | Admin | Daftar anggota |
 | `DELETE /v1/namespaces/{ns}/members/{sub}` | Admin | Cabut anggota selain diri sendiri |
-| `GET /v1/namespaces/{ns}/audit` | Admin | 100 audit event terbaru |
-| `POST /v1/namespaces/{ns}/usage` | Anggota | Kirim metrik pemanggilan skill |
-| `GET /v1/namespaces/{ns}/usage` | Admin | Ringkasan penggunaan 30 hari |
+| `GET /v1/namespaces/{ns}/audit` | Izin audit | 100 audit event terbaru |
+| `POST /v1/namespaces/{ns}/usage` | Izin usage-write | Kirim metrik pemanggilan skill |
+| `GET /v1/namespaces/{ns}/usage` | Izin usage-read | Ringkasan penggunaan 30 hari |
 | `GET /v1/mode`, `GET /healthz`, `GET /readyz` | Publik | Status mode dan health |
 
 Contoh kirim usage setelah agen memakai skill yang sudah published:

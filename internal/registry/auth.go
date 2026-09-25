@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/mail"
 	"net/url"
 	"strings"
 
@@ -67,13 +66,13 @@ func (a *App) auth(next endpoint) http.HandlerFunc {
 				return
 			}
 			if a.mode == "dev" && subtle.ConstantTimeCompare([]byte(h[1]), []byte(a.devToken)) == 1 {
-				next(w, r, actor{"dev-user"})
+				a.serveActor(w, r, "dev-user", next, true)
 				return
 			}
 			if a.verifier != nil {
 				token, err := a.verifier.Verify(r.Context(), h[1])
 				if err == nil && token.Subject != "" && !strings.HasPrefix(token.Subject, "local:") {
-					next(w, r, actor{token.Subject})
+					a.serveActor(w, r, token.Subject, next, true)
 					return
 				}
 			}
@@ -90,7 +89,7 @@ func (a *App) auth(next endpoint) http.HandlerFunc {
 			problem(w, 401, "session expired")
 			return
 		}
-		next(w, r, actor{subject})
+		a.serveActor(w, r, subject, next, false)
 	}
 }
 
@@ -140,32 +139,23 @@ func (a *App) register(w http.ResponseWriter, r *http.Request) {
 	if !a.authLimit(w, r) {
 		return
 	}
-	var v struct{ Email, Username, Password string }
-	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&v) != nil {
-		problem(w, 400, "invalid registration")
+	var v newUser
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&v) != nil || !v.validate() {
+		problem(w, 400, "valid email, username, and password of 12–72 bytes required")
 		return
 	}
-	v.Email = strings.ToLower(strings.TrimSpace(v.Email))
-	v.Username = strings.ToLower(strings.TrimSpace(v.Username))
-	email, err := mail.ParseAddress(v.Email)
-	if err != nil || email.Address != v.Email || len(v.Email) > 254 || !identifier.MatchString(v.Username) || len(v.Password) < 12 || len(v.Password) > 72 {
-		problem(w, 400, "valid email, username (a-z, 0-9, hyphen), and password of 12–72 bytes required")
-		return
-	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(v.Password), 12)
+	// Public registration cannot assign roles or grants.
+	v.SystemRole = ""
+	v.Grants = nil
+	sub, err := a.createLocalAccount(r.Context(), v, nil)
 	if err != nil {
-		problem(w, 500, "password error")
-		return
-	}
-	sub := "local:" + randomToken()
-	_, err = a.db.Exec(r.Context(), "INSERT INTO users(subject,email,username,password_hash) VALUES($1,$2,$3,$4)", sub, v.Email, v.Username, hash)
-	if err != nil {
-		problem(w, 409, "email or username unavailable")
+		accountError(w, err)
 		return
 	}
 	if a.newSession(w, r, sub) {
 		respond(w, 201, map[string]string{"subject": sub, "username": v.Username, "email": v.Email})
 	}
+
 }
 
 var dummyHash, _ = bcrypt.GenerateFromPassword([]byte("dummy-password-for-timing"), 12)
@@ -185,7 +175,7 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 	}
 	var sub string
 	var hash []byte
-	err := a.db.QueryRow(r.Context(), "SELECT subject,password_hash FROM users WHERE email=$1 OR username=$1", strings.ToLower(strings.TrimSpace(v.Login))).Scan(&sub, &hash)
+	err := a.db.QueryRow(r.Context(), "SELECT u.subject,u.password_hash FROM users u JOIN principals p USING(subject) WHERE (email=$1 OR username=$1) AND NOT p.disabled", strings.ToLower(strings.TrimSpace(v.Login))).Scan(&sub, &hash)
 	if err != nil {
 		hash = dummyHash
 	}
@@ -201,7 +191,7 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 func (a *App) me(w http.ResponseWriter, r *http.Request, u actor) {
 	var email, username string
 	_ = a.db.QueryRow(r.Context(), "SELECT email,username FROM users WHERE subject=$1", u.Subject).Scan(&email, &username)
-	respond(w, 200, map[string]string{"subject": u.Subject, "email": email, "username": username})
+	respond(w, 200, map[string]any{"subject": u.Subject, "email": email, "username": username, "system_role": map[bool]string{true: "super-admin", false: "user"}[a.systemAdmin(r.Context(), u)], "can_create_namespace": a.canCreateNamespace(r.Context(), u)})
 }
 func (a *App) logout(w http.ResponseWriter, r *http.Request, u actor) {
 	if c, err := r.Cookie("registry_session"); err == nil {
@@ -254,9 +244,11 @@ func (a *App) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		problem(w, 401, "invalid ID token")
 		return
 	}
-	if a.newSession(w, r, id.Subject) {
-		http.Redirect(w, r, "/", http.StatusSeeOther)
-	}
+	a.serveActor(w, r, id.Subject, func(w http.ResponseWriter, r *http.Request, u actor) {
+		if a.newSession(w, r, u.Subject) {
+			http.Redirect(w, r, "/", http.StatusSeeOther)
+		}
+	}, true)
 }
 func validatePublicURL(raw string) error {
 	u, err := url.Parse(raw)

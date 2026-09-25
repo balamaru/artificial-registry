@@ -61,6 +61,9 @@ func TestRegistryIntegration(t *testing.T) {
 		return cookies[0], profile["subject"]
 	}
 	owner, subject := signup("owner-" + suffix)
+	if _, err := a.db.Exec(context.Background(), "UPDATE principals SET system_role='super-admin' WHERE subject=$1", subject); err != nil {
+		t.Fatal(err)
+	}
 	reader, readerSubject := signup("reader-" + suffix)
 	stranger, _ := signup("outsider-" + suffix)
 	if !owner.HttpOnly || owner.SameSite != http.SameSiteLaxMode {
