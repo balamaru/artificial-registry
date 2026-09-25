@@ -1,2 +1,8 @@
 .README-TEKNIS.md
 .docs/PRD.md
+.env
+.env.*
+cookies.txt
+node_modules/
+playwright-report/
+test-results/

@@ -1,3 +1,9 @@
 .git
 *.zip
 README.md
+.env
+.env.*
+cookies.txt
+node_modules
+playwright-report
+test-results

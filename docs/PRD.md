@@ -1,5 +1,7 @@
 # Artificial Registry
 
+> Scope implementasi uji awal: core services 1 dan 3 tersedia gratis tanpa license key, termasuk fitur yang awalnya berlabel Enterprise. Core service 2 dikecualikan. Lihat README dan docs/operations.md untuk fitur yang tersedia serta batas implementasi.
+
 ## 1. Ringkasan
 Product registry yang ada saat ini berperan untuk menyimpan docker image ataupun hasil build baik dari node, golang, rust, dsb. Namun dengan berkembangnya AI saat ini banyak company yang melakukan coding dengan bantuan AI Agent (Vibe Coding), untuk memperoleh kemampuan yang lebih optimum agent-agent AI yang diperintahkan untuk melakukan coding diberikan skill - skill yang sesuai dengan kebutuhan, seperti hasil build node atau hasil build image, tidak semuanya bisa dipublish secara publik, karena ini merupakan core/service suatu perusahaan yang memang mendukung sisi bisnisnya (agar model bisnis tidak bocor keluar). Saat ini ada beberapa Registry Ai Skill yang tersedia seperti Google Cloud Agent Registry berbasis Managed cloud ataupun SkillHub by iFlyTek untuk self hosted.
 

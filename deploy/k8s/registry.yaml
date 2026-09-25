@@ -27,7 +27,7 @@ spec:
             readOnlyRootFilesystem: true
             capabilities: {drop: [ALL]}
           readinessProbe:
-            httpGet: {path: /healthz, port: 8080}
+            httpGet: {path: /readyz, port: 8080}
           livenessProbe:
             httpGet: {path: /healthz, port: 8080}
 ---
