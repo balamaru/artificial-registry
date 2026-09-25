@@ -13,8 +13,9 @@ const base = () => `/v1/namespaces/${encodeURIComponent(current.name)}`;
 function el(tag, text, className) { const e = document.createElement(tag); if (text !== undefined) e.textContent = text; if (className) e.className = className; return e; }
 function action(label, fn) { const b = el('button', label); b.onclick = () => run(b, fn); return b; }
 async function run(button, fn) { button.disabled = true; try { await fn(); } catch (e) { notify(e.message, true); } finally { button.disabled = button.id === "previous" ? offset === 0 : button.id === "next" ? $("#skills").querySelectorAll("article").length < 12 : button.id === "users-previous" ? usersOffset === 0 : button.id === "users-next" ? $("#users-list").querySelectorAll("tbody tr").length < 25 : false; } }
-function form(id, fn) { $(id).onsubmit = e => { e.preventDefault(); const f = e.currentTarget; run(f.querySelector('button'), () => fn(Object.fromEntries(new FormData(f)), f)); }; }
+function form(id, fn) { $(id).onsubmit = e => { e.preventDefault(); const f = e.currentTarget; run(f.querySelector('button[type=submit], button:not([type])'), () => fn(Object.fromEntries(new FormData(f)), f)); }; }
 function showAuth() {
+ resetMemberPicker();
  $('#workspace').hidden = true; $('#auth').hidden = false; $('#logout').hidden = true; $('#identity').textContent = ''; $('#users-panel').hidden = true; selectedUser = null;
  $('#auth-form').hidden = !config.local; $('#sso').hidden = !config.oidc; $('#auth-toggle').hidden = !config.local || !config.registration;
  registration = registration && config.registration; renderAuth();
@@ -38,6 +39,7 @@ async function load() {
  $('#empty').hidden = !!current; $('#namespace-content').hidden = !current; if (current) await selectNamespace();
 }
 async function selectNamespace() {
+ resetMemberPicker();
  current = namespaces.find(n => n.name === $('#namespace').value); offset = 0; $('#role').textContent = current.role;
  document.querySelectorAll('[data-permission]').forEach(e => e.hidden = !can(e.dataset.permission)); $('#upload-card').hidden = !can('write'); $('#record-usage').hidden = !can('usage-write'); await tab('skills');
 }
@@ -83,15 +85,17 @@ function table(target, headings, rows) {
 async function analytics() { const data = await api(`${base()}/usage`); table('#usage', ['Skill', 'Calls', 'Avg ms', 'Success', 'Tokens saved (est.)', 'USD saved (est.)'], data.items.map(x => [`${x.skill}@${x.version}`, x.calls, x.avg_latency_ms, `${x.success_pct}%`, x.estimated_tokens_saved, x.estimated_cost_usd])); }
 async function audit() { const items = await api(`${base()}/audit`); table('#audit', ['Time', 'Actor', 'Action', 'Skill', 'Details'], items.map(x => [new Date(x.at).toLocaleString(), x.subject, x.action, x.skill, JSON.stringify(x.detail)])); }
 async function members() { const items = await api(`${base()}/members`); table('#members', ['User', 'Subject ID', 'Role', ''], items.map(x => [x.username || 'External user', x.subject, x.role, x.subject === user.subject ? 'You' : action('Remove', async () => { if (!confirm(`Remove access for ${x.username || x.subject}?`)) return; await api(`${base()}/members/${encodeURIComponent(x.subject)}`, { method: 'DELETE' }); await members(); })])); }
-form('#member-form', async (data, f) => { await api(`${base()}/members/${encodeURIComponent(data.subject)}`, json('PUT', { roles: [...f.elements.roles.selectedOptions].map(o => o.value) })); f.reset(); await members(); notify('Member role updated.'); });
+form('#member-form', async data => { const roles = selectedMemberRoles(); if (!data.subject) throw new Error('Select a user from the search results.'); if (!roles.length) throw new Error('Choose at least one role.'); await api(`${base()}/members/${encodeURIComponent(data.subject)}`, json('PUT', { roles })); resetMemberPicker(); await members(); notify('Member role updated.'); });
 form('#usage-form', async data => { for (const key of ['latency_ms', 'estimated_tokens_saved', 'estimated_cost_usd']) data[key] = Number(data[key]); data.success = data.success === 'true'; await api(`${base()}/usage`, json('POST', data)); await analytics(); notify('Usage recorded.'); });
-async function tab(name) { document.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === name)); for (const id of ['skills', 'usage', 'audit', 'members']) $(`#${id}-panel`).hidden = id !== name; await ({ skills, usage: analytics, audit, members })[name](); }
+async function tab(name) { if (name !== 'members') { closeMemberSearch(); closeMemberRoles(); } document.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === name)); for (const id of ['skills', 'usage', 'audit', 'members']) $(`#${id}-panel`).hidden = id !== name; await ({ skills, usage: analytics, audit, members })[name](); }
 document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => run(b, () => tab(b.dataset.tab)));
+initMemberPicker();
 (async () => { try { config = await api('/auth/config'); try { await load(); } catch (e) { if (e.message === 'login required' || e.message === 'session expired') showAuth(); else throw e; } } catch (e) { notify(e.message, true); } })();
 
 function populateRoles() {
  const names = Object.keys(roleCatalog).filter(n => !['reader', 'publisher'].includes(n)).sort();
- for (const selector of ['#member-form [name=roles]', '#grant-form [name=roles]']) { const select = $(selector); select.replaceChildren(); for (const name of names) { const option = el('option', name); option.value = name; select.append(option); } }
+ populateMemberRoles(names);
+ for (const selector of ['#grant-form [name=roles]']) { const select = $(selector); select.replaceChildren(); for (const name of names) { const option = el('option', name); option.value = name; select.append(option); } }
  table('#role-help', ['Role', 'Permissions'], names.map(n => [n, roleCatalog[n].join(', ')]));
 }
 $('#cancel-update').onclick = () => $('#update-dialog').close();

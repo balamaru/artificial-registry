@@ -30,6 +30,7 @@ func (a *App) routes(m *http.ServeMux) {
 	})
 	m.HandleFunc("GET /v1/namespaces", a.auth(a.namespaces))
 	m.HandleFunc("GET /v1/namespaces/{ns}/members", a.auth(a.members))
+	m.HandleFunc("GET /v1/namespaces/{ns}/member-candidates", a.auth(a.memberCandidates))
 	m.HandleFunc("DELETE /v1/namespaces/{ns}/members/{sub}", a.auth(a.removeMember))
 	m.HandleFunc("POST /v1/namespaces/{ns}/skills/{skill}/versions/{version}/reject", a.auth(a.reject))
 	m.HandleFunc("POST /v1/namespaces/{ns}/skills/{skill}/versions/{version}/rescan", a.auth(a.rescan))

@@ -43,6 +43,14 @@ Metadata meliputi nama/versi, hash, status, revision, dan hasil scan; role updat
 
 Hanya super-admin dan user dengan role `admin` pada scope `*` yang dapat membuat namespace. Pembuat namespace memperoleh grant admin pada namespace tersebut. Admin namespace boleh menambahkan/mengubah/mencabut anggota dalam namespace-nya melalui username, email, atau subject ID existing, tetapi tidak dapat memberikan grant global atau mengelola akun registry. Mengubah role anggota mengganti seluruh role khusus namespace tersebut. User tidak boleh menurunkan/menghapus assignment admin dirinya sendiri melalui endpoint anggota.
 
+## Pencarian user pada Members
+
+Klik kolom **Search username, email, or subject ID** untuk menampilkan daftar akun aktif. Saat mengetik, daftar otomatis difilter berdasarkan potongan username, email, atau subject ID tanpa membedakan huruf besar/kecil. Pilih user dari daftar, lalu buka **Choose roles** dan centang satu atau beberapa role; tidak perlu Ctrl/Cmd. Kolom pencarian, dropdown role, dan tombol Set role memiliki tinggi yang sama. Tombol panah dan Enter dapat digunakan untuk memilih user, dan Escape menutup dropdown.
+
+Daftar mencakup akun yang belum menjadi anggota namespace agar admin dapat menambahkannya. Akun disabled tidak ditampilkan. Daftar dimuat 50 akun per halaman; **Load more users** menampilkan hasil berikutnya. Role hanya disimpan setelah menekan **Set role**. Mengedit teks pencarian membatalkan pilihan user sebelumnya untuk mencegah assignment ke akun yang salah.
+
+Endpoint `GET /v1/namespaces/{ns}/member-candidates?q=&limit=50&offset=0` memerlukan izin `members` pada namespace tersebut. Response berisi `items` (subject, username, email saja) dan `has_more`. Namespace admin dapat melakukan pencarian ini tanpa akses administrasi user global; password, role registry, dan grant namespace lain tidak disertakan.
+
 ## API administrasi
 
 Semua endpoint berikut memerlukan super-admin; cookie request mutasi memerlukan `X-Registry-CSRF: 1` seperti endpoint lainnya.
