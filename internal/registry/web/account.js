@@ -13,8 +13,10 @@ function userActions(account) {
 }
 $('#my-account').onclick = () => run($('#my-account'), async () => {
  $('#registry-view').hidden = true; $('#users-panel').hidden = true; $('#account-panel').hidden = false; $('#back-registry').hidden = false;
+ activateNav('nav-security', 'Account & tokens', 'Change your password and manage scoped CLI credentials.');
  $('#password-form').hidden = !user.local; $('#external-password').hidden = !!user.local; clearTokenSecret(); await refreshTokens(); await refreshTokenOptions();
 });
+$('#nav-security').onclick = () => $('#my-account').click();
 $('#hide-token').onclick = clearTokenSecret;
 form('#password-form', async (data, f) => {
  if (data.new_password !== data.confirmation) throw new Error('New passwords do not match.');

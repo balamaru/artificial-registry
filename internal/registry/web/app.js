@@ -14,6 +14,26 @@ function el(tag, text, className) { const e = document.createElement(tag); if (t
 function action(label, fn) { const b = el('button', label); b.onclick = () => run(b, fn); return b; }
 async function run(button, fn) { button.disabled = true; try { await fn(); } catch (e) { notify(e.message, true); } finally { button.disabled = button.id === "previous" ? offset === 0 : button.id === "next" ? $("#skills").querySelectorAll("article").length < 12 : button.id === "users-previous" ? usersOffset === 0 : button.id === "users-next" ? $("#users-list").querySelectorAll("tbody tr").length < 25 : false; } }
 function form(id, fn) { $(id).onsubmit = e => { e.preventDefault(); const f = e.currentTarget; run(f.querySelector('button[type=submit], button:not([type])'), () => fn(Object.fromEntries(new FormData(f)), f)); }; }
+function closeSidebar() { $('#app-sidebar').classList.remove('open'); $('#sidebar-backdrop').hidden = true; $('#sidebar-toggle').setAttribute('aria-expanded', 'false'); }
+function activateNav(id, title, description) {
+ document.querySelectorAll('.side-link').forEach(button => button.classList.toggle('active', button.id === id));
+ if (title) $('#page-title').textContent = title;
+ if (description) $('#page-description').textContent = description;
+ closeSidebar();
+}
+function showRegistryView(summary = false) {
+ $('#registry-view').hidden = false; $('#users-panel').hidden = true; $('#account-panel').hidden = true; $('#back-registry').hidden = true;
+ $('#dashboard-summary').hidden = !summary;
+}
+$('#sidebar-toggle').onclick = () => { const open = $('#app-sidebar').classList.toggle('open'); $('#sidebar-backdrop').hidden = !open; $('#sidebar-toggle').setAttribute('aria-expanded', String(open)); };
+$('#sidebar-backdrop').onclick = closeSidebar;
+$('#help-menu').onclick = () => $('#help-dialog').showModal();
+$('#close-help').onclick = () => $('#help-dialog').close();
+$('#help-dialog').onclick = e => { if (e.target === $('#help-dialog')) $('#help-dialog').close(); };
+$('#nav-dashboard').onclick = () => run($('#nav-dashboard'), async () => { showRegistryView(true); activateNav('nav-dashboard', 'Dashboard', 'Manage trusted skills, access, and activity from one workspace.'); if (current) await tab('skills'); });
+$('#nav-registry').onclick = () => run($('#nav-registry'), async () => { showRegistryView(false); activateNav('nav-registry', 'Skill registry', 'Browse, publish, review, and maintain versioned skills.'); if (current) await tab('skills'); });
+$('#nav-members').onclick = () => run($('#nav-members'), async () => { showRegistryView(false); activateNav('nav-members', 'Namespace members', 'Search users and assign namespace roles.'); if (current) await tab('members'); });
+$('#nav-audit').onclick = () => run($('#nav-audit'), async () => { showRegistryView(false); activateNav('nav-audit', 'Audit log', 'Review recent activity for the selected namespace.'); if (current) await tab('audit'); });
 function showAuth() {
  resetMemberPicker(); clearAccount(); $('#first-login').hidden = true; $('#first-login-form').reset();
  $('#workspace').hidden = true; $('#auth').hidden = false; $('#logout').hidden = true; $('#identity').textContent = ''; $('#users-panel').hidden = true; selectedUser = null;
@@ -33,15 +53,19 @@ form('#first-login-form', async (data, f) => {
 $('#logout').onclick = () => run($('#logout'), async () => { await api('/auth/logout', { method: 'POST' }); showAuth(); });
 async function load() {
  clearTokenSecret();
- user = await api('/auth/me'); if (user.must_change_password) { showFirstLogin(); return; } $('#first-login').hidden = true; roleCatalog = await api('/v1/roles'); populateRoles(); $('#manage-users').hidden = !user.can_delete_users; $('#account-panel').hidden = true; $('#namespace-form').hidden = !user.can_create_namespace; $('#registry-view').hidden = false; $('#users-panel').hidden = true; $('#back-registry').hidden = true; $('#identity').textContent = `${user.username || 'SSO user'} · ${user.subject}`; $('#logout').hidden = false; $('#auth').hidden = true; $('#workspace').hidden = false;
+ user = await api('/auth/me'); if (user.must_change_password) { showFirstLogin(); return; } $('#first-login').hidden = true; roleCatalog = await api('/v1/roles'); populateRoles(); $('#manage-users').hidden = !user.can_delete_users; $('#nav-users').hidden = !user.can_delete_users; $('#account-panel').hidden = true; $('#namespace-form').hidden = !user.can_create_namespace; $('#registry-view').hidden = false; $('#users-panel').hidden = true; $('#back-registry').hidden = true; $('#identity').textContent = `${user.username || 'SSO user'} · ${user.system_role}`; $('.avatar').textContent = (user.username || 'S').slice(0, 1).toUpperCase(); $('#metric-auth').textContent = user.local ? 'Local' : 'SSO'; $('#logout').hidden = false; $('#auth').hidden = true; $('#workspace').hidden = false;
  namespaces = await api('/v1/namespaces'); const previous = current?.name; $('#namespace').replaceChildren();
  for (const ns of namespaces) { const option = el('option', ns.name); option.value = ns.name; $('#namespace').append(option); }
  current = namespaces.find(n => n.name === previous) || namespaces[0]; if (current) $('#namespace').value = current.name;
+ $('#metric-namespaces').textContent = namespaces.length; $('#metric-role').textContent = current?.role || 'No access';
  $('#empty').hidden = !!current; $('#namespace-content').hidden = !current; if (current) await selectNamespace();
+ $('#nav-members').hidden = !current || !can('members'); $('#nav-audit').hidden = !current || !can('audit'); activateNav('nav-dashboard', 'Dashboard', 'Manage trusted skills, access, and activity from one workspace.');
 }
 async function selectNamespace() {
  resetMemberPicker();
  current = namespaces.find(n => n.name === $('#namespace').value); offset = 0; $('#role').textContent = current.role;
+ $('#metric-role').textContent = current.role || 'Custom';
+ $('#nav-members').hidden = !can('members'); $('#nav-audit').hidden = !can('audit');
  document.querySelectorAll('[data-permission]').forEach(e => e.hidden = !can(e.dataset.permission)); $('#upload-card').hidden = !can('write'); $('#record-usage').hidden = !can('usage-write'); await tab('skills');
 }
 $('#namespace').onchange = () => selectNamespace().catch(e => notify(e.message, true));
@@ -105,10 +129,11 @@ form('#update-form', async (data, f) => {
  await api(updateTarget.path, { method: 'PUT', headers: { 'Content-Type': 'application/zip', 'If-Match': updateTarget.sha256 }, body: data.bundle }); $('#update-dialog').close(); f.reset(); await skills(); notify('Updated and quarantined. Review and approve the new content.');
 });
 $('#manage-users').onclick = () => run($('#manage-users'), async () => {
- $('#account-panel').hidden = true; clearTokenSecret(); $('#registry-view').hidden = true; $('#users-panel').hidden = false; $('#back-registry').hidden = false; $('#create-user-card').hidden = config.oidc_only || !user.can_admin_users; $('#admin-audit-card').hidden = !user.can_admin_users;
+ $('#account-panel').hidden = true; clearTokenSecret(); $('#registry-view').hidden = true; $('#users-panel').hidden = false; $('#back-registry').hidden = false; $('#create-user-card').hidden = config.oidc_only || !user.can_admin_users; $('#admin-audit-card').hidden = !user.can_admin_users; activateNav('nav-users', 'Users & access', 'Create accounts and manage registry and namespace permissions.');
  const scope = $('#grant-form [name=namespace]'); scope.replaceChildren(); for (const ns of [{ name: '*' }, ...namespaces]) { const option = el('option', ns.name === '*' ? 'All namespaces (including future)' : ns.name); option.value = ns.name; scope.append(option); }
  usersOffset = 0; await users();
 });
+$('#nav-users').onclick = () => $('#manage-users').click();
 $('#back-registry').onclick = () => run($('#back-registry'), async () => { await load(); });
 form('#create-user-form', async (data, f) => { await api('/v1/admin/users', json('POST', data)); f.reset(); usersOffset = 0; await users(); notify('User created. Select Manage to assign namespace access.'); });
 form('#user-search', async () => { usersOffset = 0; await users(); });

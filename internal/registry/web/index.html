@@ -1,16 +1,33 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Artificial Registry</title><link rel="stylesheet" href="/style.css"><script src="/member-picker.js" defer></script><script src="/app.js" defer></script><script src="/account.js" defer></script></head>
 <body>
-<header><a class="brand" href="/">◈ Artificial Registry</a><span class="badge">FREE · SELF HOSTED</span><span id="identity"></span><button id="logout" hidden>Sign out</button></header>
+<header class="topbar"><button id="sidebar-toggle" class="icon-button" type="button" aria-label="Toggle navigation" aria-expanded="false">☰</button><a class="brand" href="/"><span class="brand-mark">A</span><span>Artificial Registry</span></a><span class="environment-badge">SELF-HOSTED</span><div class="topbar-spacer"></div><button class="icon-button" id="help-menu" type="button" aria-label="Help" title="Quick help">?</button><div class="identity-block"><span class="avatar" aria-hidden="true">A</span><span id="identity"></span></div><button id="logout" hidden>Sign out</button></header>
 <div id="message" role="status" aria-live="polite" hidden></div>
-<main>
+<aside id="app-sidebar" aria-label="Primary navigation">
+<nav class="side-nav">
+<button class="side-link active" id="nav-dashboard" type="button" aria-label="Open dashboard"><span aria-hidden="true">⌂</span>Dashboard</button>
+<button class="side-link" id="nav-registry" type="button" aria-label="Open skill registry"><span aria-hidden="true">◇</span>Registry</button>
+<button class="side-link" id="nav-members" type="button" aria-label="Open member access"><span aria-hidden="true">♙</span>Members</button>
+<button class="side-link" id="nav-users" type="button" aria-label="Open user administration" hidden><span aria-hidden="true">♟</span>Users & access</button>
+<button class="side-link" id="nav-security" type="button" aria-label="Open account security"><span aria-hidden="true">⌁</span>Account & tokens</button>
+<button class="side-link" id="nav-audit" type="button" aria-label="Open audit activity"><span aria-hidden="true">≡</span>Audit log</button>
+</nav>
+<div class="side-footer"><span class="status-dot"></span><span>Registry online</span><small>Free edition</small></div>
+</aside>
+<button id="sidebar-backdrop" type="button" aria-label="Close navigation" hidden></button>
+<main id="main-content">
 <section id="auth" hidden><div class="intro"><span class="eyebrow">YOUR TEAM'S SKILL LIBRARY</span><h1>Trusted skills.<br>Shared intelligence.</h1><p>Publish, review, and discover private AI skills in one place.</p><div class="feature">01 &nbsp; Security & prompt scanning</div><div class="feature">03 &nbsp; Usage & savings analytics</div></div>
 <div class="card"><h2 id="auth-title">Sign in</h2><p id="auth-description">Request an account from your administrator.</p><form id="auth-form"><label>Email or username<input name="login" autocomplete="username" required></label><label>Password<input name="password" type="password" maxlength="72" autocomplete="current-password" required></label><button class="primary" id="auth-submit">Sign in</button></form><a id="sso" class="button" href="/auth/oidc/login" hidden>Continue with SSO</a></div></section>
 <section id="first-login" class="card" hidden><h1>Change your initial password</h1><p>You must replace the temporary password before accessing the registry. Email is optional.</p><form id="first-login-form" class="form-grid"><label>Temporary password<input name="current_password" type="password" autocomplete="current-password" maxlength="72" required></label><label>New password<input name="new_password" type="password" autocomplete="new-password" minlength="12" maxlength="72" required></label><label>Confirm new password<input name="confirmation" type="password" autocomplete="new-password" minlength="12" maxlength="72" required></label><label>Email (optional)<input name="email" type="email" autocomplete="email" maxlength="254"></label><button class="primary">Save and sign in again</button></form></section>
 <section id="workspace" hidden>
-<div class="heading"><div><span class="eyebrow">WORKSPACE</span><h1>Skill registry</h1><p>Versioned, reviewed, and ready for your agents.</p></div><form id="namespace-form" class="inline"><input name="name" aria-label="New namespace" placeholder="new-namespace" pattern="[a-z][a-z0-9-]{0,62}" required><button class="primary">Create namespace</button></form></div>
+<div class="page-heading"><div><span class="eyebrow">WORKSPACE</span><h1 id="page-title">Dashboard</h1><p id="page-description">Manage trusted skills, access, and activity from one workspace.</p></div><form id="namespace-form" class="inline"><input name="name" aria-label="New namespace" placeholder="new-namespace" pattern="[a-z][a-z0-9-]{0,62}" required><button class="primary">Create namespace</button></form></div>
 <div class="toolbar"><button id="my-account">My account & tokens</button><button id="manage-users" hidden>Users & access</button><button id="back-registry" hidden>Back to registry</button></div>
 <div id="registry-view">
+<section id="dashboard-summary" class="dashboard-summary">
+<article class="metric-card"><span class="metric-icon">◇</span><div><small>Accessible namespaces</small><strong id="metric-namespaces">0</strong><span>Available to your account</span></div></article>
+<article class="metric-card"><span class="metric-icon">✓</span><div><small>Current access</small><strong id="metric-role">—</strong><span>Effective namespace role</span></div></article>
+<article class="metric-card"><span class="metric-icon">⌁</span><div><small>Authentication</small><strong id="metric-auth">Local</strong><span>Account security enabled</span></div></article>
+</section>
 <div class="toolbar"><label>Namespace <select id="namespace" aria-label="Namespace"></select></label><span id="role" class="badge"></span></div>
 <p id="empty" class="card" hidden>No namespace access yet. Create a namespace if permitted, or ask an administrator to grant access.</p>
 <div id="namespace-content" hidden>
@@ -46,4 +63,5 @@
 </section></section>
 <dialog id="update-dialog"><h2>Update skill ZIP</h2><p id="update-target"></p><p>The replacement will be scanned and quarantined. Approval is required again.</p><form id="update-form"><label>Replacement ZIP<input name="bundle" type="file" accept=".zip" required></label><button class="primary">Replace & scan</button><button type="button" id="cancel-update">Cancel</button></form></dialog>
 </main><footer>Artificial Registry · No license key required · Runtime sandbox excluded</footer>
+<dialog id="help-dialog"><div class="dialog-heading"><div><span class="eyebrow">QUICK HELP</span><h2>Registry workflow</h2></div><button type="button" id="close-help" class="icon-button" aria-label="Close help">×</button></div><ol><li>Create or select a namespace.</li><li>Upload a ZIP containing <code>SKILL.md</code> at its root.</li><li>Review the scan result, then approve the version.</li><li>Assign the smallest required role to each member or CLI token.</li></ol><p>Administrators can manage users, grants, account security, and audit history from the navigation menu.</p></dialog>
 </body></html>
