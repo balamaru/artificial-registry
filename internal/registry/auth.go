@@ -65,6 +65,10 @@ func (a *App) auth(next endpoint) http.HandlerFunc {
 				problem(w, 401, "invalid authorization")
 				return
 			}
+			if strings.HasPrefix(h[1], "ar_pat_") {
+				a.authenticatePAT(w, r, h[1], next)
+				return
+			}
 			if a.mode == "dev" && subtle.ConstantTimeCompare([]byte(h[1]), []byte(a.devToken)) == 1 {
 				a.serveActor(w, r, "dev-user", next, true)
 				return
@@ -191,7 +195,9 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 func (a *App) me(w http.ResponseWriter, r *http.Request, u actor) {
 	var email, username string
 	_ = a.db.QueryRow(r.Context(), "SELECT email,username FROM users WHERE subject=$1", u.Subject).Scan(&email, &username)
-	respond(w, 200, map[string]any{"subject": u.Subject, "email": email, "username": username, "system_role": map[bool]string{true: "super-admin", false: "user"}[a.systemAdmin(r.Context(), u)], "can_create_namespace": a.canCreateNamespace(r.Context(), u)})
+	var role string
+	_ = a.db.QueryRow(r.Context(), "SELECT system_role FROM principals WHERE subject=$1", u.Subject).Scan(&role)
+	respond(w, 200, map[string]any{"subject": u.Subject, "email": email, "username": username, "system_role": role, "local": username != "", "can_admin_users": a.systemAdmin(r.Context(), u), "can_delete_users": a.canDeleteUsers(r, u), "can_create_namespace": a.canCreateNamespace(r.Context(), u)})
 }
 func (a *App) logout(w http.ResponseWriter, r *http.Request, u actor) {
 	if c, err := r.Cookie("registry_session"); err == nil {

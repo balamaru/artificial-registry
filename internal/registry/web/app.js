@@ -15,7 +15,7 @@ function action(label, fn) { const b = el('button', label); b.onclick = () => ru
 async function run(button, fn) { button.disabled = true; try { await fn(); } catch (e) { notify(e.message, true); } finally { button.disabled = button.id === "previous" ? offset === 0 : button.id === "next" ? $("#skills").querySelectorAll("article").length < 12 : button.id === "users-previous" ? usersOffset === 0 : button.id === "users-next" ? $("#users-list").querySelectorAll("tbody tr").length < 25 : false; } }
 function form(id, fn) { $(id).onsubmit = e => { e.preventDefault(); const f = e.currentTarget; run(f.querySelector('button[type=submit], button:not([type])'), () => fn(Object.fromEntries(new FormData(f)), f)); }; }
 function showAuth() {
- resetMemberPicker();
+ resetMemberPicker(); clearAccount();
  $('#workspace').hidden = true; $('#auth').hidden = false; $('#logout').hidden = true; $('#identity').textContent = ''; $('#users-panel').hidden = true; selectedUser = null;
  $('#auth-form').hidden = !config.local; $('#sso').hidden = !config.oidc; $('#auth-toggle').hidden = !config.local || !config.registration;
  registration = registration && config.registration; renderAuth();
@@ -32,7 +32,8 @@ $('#auth-toggle').onclick = () => { registration = !registration; renderAuth(); 
 form('#auth-form', async (data, f) => { await api(registration ? '/auth/register' : '/auth/login', json('POST', data)); f.reset(); $('#message').hidden = true; await load(); });
 $('#logout').onclick = () => run($('#logout'), async () => { await api('/auth/logout', { method: 'POST' }); showAuth(); });
 async function load() {
- user = await api('/auth/me'); roleCatalog = await api('/v1/roles'); populateRoles(); $('#manage-users').hidden = user.system_role !== 'super-admin'; $('#namespace-form').hidden = !user.can_create_namespace; $('#registry-view').hidden = false; $('#users-panel').hidden = true; $('#back-registry').hidden = true; $('#identity').textContent = `${user.username || 'SSO user'} · ${user.subject}`; $('#logout').hidden = false; $('#auth').hidden = true; $('#workspace').hidden = false;
+ clearTokenSecret();
+ user = await api('/auth/me'); roleCatalog = await api('/v1/roles'); populateRoles(); $('#manage-users').hidden = !user.can_delete_users; $('#account-panel').hidden = true; $('#namespace-form').hidden = !user.can_create_namespace; $('#registry-view').hidden = false; $('#users-panel').hidden = true; $('#back-registry').hidden = true; $('#identity').textContent = `${user.username || 'SSO user'} · ${user.subject}`; $('#logout').hidden = false; $('#auth').hidden = true; $('#workspace').hidden = false;
  namespaces = await api('/v1/namespaces'); const previous = current?.name; $('#namespace').replaceChildren();
  for (const ns of namespaces) { const option = el('option', ns.name); option.value = ns.name; $('#namespace').append(option); }
  current = namespaces.find(n => n.name === previous) || namespaces[0]; if (current) $('#namespace').value = current.name;
@@ -90,7 +91,7 @@ form('#usage-form', async data => { for (const key of ['latency_ms', 'estimated_
 async function tab(name) { if (name !== 'members') { closeMemberSearch(); closeMemberRoles(); } document.querySelectorAll('[data-tab]').forEach(b => b.classList.toggle('active', b.dataset.tab === name)); for (const id of ['skills', 'usage', 'audit', 'members']) $(`#${id}-panel`).hidden = id !== name; await ({ skills, usage: analytics, audit, members })[name](); }
 document.querySelectorAll('[data-tab]').forEach(b => b.onclick = () => run(b, () => tab(b.dataset.tab)));
 initMemberPicker();
-(async () => { try { config = await api('/auth/config'); try { await load(); } catch (e) { if (e.message === 'login required' || e.message === 'session expired') showAuth(); else throw e; } } catch (e) { notify(e.message, true); } })();
+document.addEventListener('DOMContentLoaded', async () => { try { config = await api('/auth/config'); try { await load(); } catch (e) { if (e.message === 'login required' || e.message === 'session expired') showAuth(); else throw e; } } catch (e) { notify(e.message, true); } });
 
 function populateRoles() {
  const names = Object.keys(roleCatalog).filter(n => !['reader', 'publisher'].includes(n)).sort();
@@ -104,7 +105,7 @@ form('#update-form', async (data, f) => {
  await api(updateTarget.path, { method: 'PUT', headers: { 'Content-Type': 'application/zip', 'If-Match': updateTarget.sha256 }, body: data.bundle }); $('#update-dialog').close(); f.reset(); await skills(); notify('Updated and quarantined. Review and approve the new content.');
 });
 $('#manage-users').onclick = () => run($('#manage-users'), async () => {
- $('#registry-view').hidden = true; $('#users-panel').hidden = false; $('#back-registry').hidden = false; $('#create-user-card').hidden = !config.local;
+ $('#account-panel').hidden = true; clearTokenSecret(); $('#registry-view').hidden = true; $('#users-panel').hidden = false; $('#back-registry').hidden = false; $('#create-user-card').hidden = !config.local || !user.can_admin_users; $('#admin-audit-card').hidden = !user.can_admin_users;
  const scope = $('#grant-form [name=namespace]'); scope.replaceChildren(); for (const ns of [{ name: '*' }, ...namespaces]) { const option = el('option', ns.name === '*' ? 'All namespaces (including future)' : ns.name); option.value = ns.name; scope.append(option); }
  usersOffset = 0; await users();
 });
@@ -116,7 +117,7 @@ $('#users-next').onclick = () => run($('#users-next'), async () => { usersOffset
 async function users() {
  const q = new URLSearchParams(new FormData($('#user-search'))); q.set('limit', '25'); q.set('offset', usersOffset);
  const items = await api(`/v1/admin/users?${q}`);
- table('#users-list', ['User', 'Email / subject', 'Registry role', 'Status', ''], items.map(u => [u.username || 'External user', u.email || u.subject, u.system_role, u.disabled ? 'Disabled' : 'Active', action('Manage', async () => { selectedUser = u; editUser(); })]));
+ table('#users-list', ['User', 'Email / subject', 'Registry role', 'Status', ''], items.map(u => [u.username || 'External user', u.email || u.subject, u.system_role, u.disabled ? 'Disabled' : 'Active', userActions(u)]));
  $('#users-page').textContent = `Page ${usersOffset / 25 + 1}`; $('#users-previous').disabled = usersOffset === 0; $('#users-next').disabled = items.length < 25;
  if (selectedUser) { selectedUser = items.find(u => u.subject === selectedUser.subject) || null; if (selectedUser) editUser(); else $('#user-editor').hidden = true; }
 }
@@ -128,5 +129,5 @@ function editUser() {
 }
 async function saveGrants(grants) { await api(`/v1/admin/users/${encodeURIComponent(selectedUser.subject)}/grants`, json('PUT', { grants })); await users(); notify('Namespace grants updated.'); }
 form('#grant-form', async (data, f) => { const grant = { namespace: data.namespace, roles: [...f.elements.roles.selectedOptions].map(o => o.value) }; await saveGrants([...selectedUser.grants.filter(g => g.namespace !== grant.namespace), grant]); });
-form('#account-form', async data => { if (data.disabled !== undefined) data.disabled = data.disabled === 'true'; if (!data.password) delete data.password; await api(`/v1/admin/users/${encodeURIComponent(selectedUser.subject)}`, json('PATCH', data)); await users(); notify('Account updated. Password resets and disabling revoke existing sessions.'); });
+form('#account-form', async data => { if (data.disabled !== undefined) data.disabled = data.disabled === 'true'; if (!data.password) delete data.password; await api(`/v1/admin/users/${encodeURIComponent(selectedUser.subject)}`, json('PATCH', data)); await users(); notify('Account updated. Password resets and disabling revoke sessions and CLI tokens.'); });
 $('#load-admin-audit').onclick = () => run($('#load-admin-audit'), async () => { const items = await api('/v1/admin/audit'); table('#admin-audit', ['Time', 'Actor', 'Action', 'Details'], items.map(x => [new Date(x.at).toLocaleString(), x.subject, x.action, JSON.stringify(x.detail)])); });

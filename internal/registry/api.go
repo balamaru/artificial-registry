@@ -19,6 +19,12 @@ func (a *App) routes(m *http.ServeMux) {
 	m.HandleFunc("POST /auth/login", a.login)
 	m.HandleFunc("POST /auth/logout", a.auth(a.logout))
 	m.HandleFunc("GET /auth/me", a.auth(a.me))
+	m.HandleFunc("POST /auth/password", a.auth(a.changePassword))
+	m.HandleFunc("GET /auth/token-options", a.auth(a.tokenOptions))
+	m.HandleFunc("GET /auth/tokens", a.auth(a.listTokens))
+	m.HandleFunc("POST /auth/tokens", a.auth(a.createToken))
+	m.HandleFunc("DELETE /auth/tokens/{id}", a.auth(a.revokeToken))
+	m.HandleFunc("DELETE /v1/admin/users/{sub}", a.auth(a.deleteUser))
 	m.HandleFunc("GET /auth/oidc/login", a.oidcLogin)
 	m.HandleFunc("GET /auth/oidc/callback", a.oidcCallback)
 	m.HandleFunc("GET /readyz", func(w http.ResponseWriter, r *http.Request) {

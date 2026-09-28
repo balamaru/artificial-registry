@@ -76,15 +76,16 @@ func validRoles(roles []string) bool {
 	return true
 }
 func (a *App) systemAdmin(ctx context.Context, u actor) bool {
-	var yes bool
-	_ = a.db.QueryRow(ctx, "SELECT system_role='super-admin' AND NOT disabled FROM principals WHERE subject=$1", u.Subject).Scan(&yes)
-	return yes
-}
-func (a *App) allowed(r *http.Request, u actor, permission string) bool {
-	if !validPath(r) {
+	if p := requestToken(ctx); p != nil && !has(p.SystemRoles, "super-admin") {
 		return false
 	}
-	if a.systemAdmin(r.Context(), u) {
+	return a.ownerSystemAdmin(ctx, u)
+}
+func (a *App) allowed(r *http.Request, u actor, permission string) bool {
+	if !validPath(r) || !tokenAllows(r.Context(), r.PathValue("ns"), permission) {
+		return false
+	}
+	if a.ownerSystemAdmin(r.Context(), u) {
 		return true
 	}
 	var roles []string
@@ -92,7 +93,10 @@ func (a *App) allowed(r *http.Request, u actor, permission string) bool {
 	return err == nil && has(permissionsFor(roles), permission)
 }
 func (a *App) canCreateNamespace(ctx context.Context, u actor) bool {
-	if a.systemAdmin(ctx, u) {
+	if !tokenAllows(ctx, "*", "members") {
+		return false
+	}
+	if a.ownerSystemAdmin(ctx, u) {
 		return true
 	}
 	var yes bool
@@ -148,7 +152,7 @@ func (a *App) serveActor(w http.ResponseWriter, r *http.Request, subject string,
 	next(w, r, actor{subject})
 }
 func auditTx(ctx context.Context, tx pgx.Tx, u actor, action, ns, skill string, detail any) error {
-	body, err := json.Marshal(detail)
+	body, err := json.Marshal(tokenAudit(ctx, detail))
 	if err != nil {
 		return err
 	}
@@ -206,7 +210,7 @@ func (a *App) roleCatalog(w http.ResponseWriter, r *http.Request, u actor) {
 	respond(w, 200, rolePermissions)
 }
 func (a *App) namespaces(w http.ResponseWriter, r *http.Request, u actor) {
-	admin := a.systemAdmin(r.Context(), u)
+	admin := a.ownerSystemAdmin(r.Context(), u)
 	rows, err := a.db.Query(r.Context(), `SELECT n.name,COALESCE(array_agg(DISTINCT b.role) FILTER (WHERE b.role IS NOT NULL),'{}') FROM namespaces n LEFT JOIN role_bindings b ON b.subject=$1 AND b.scope IN ('*',n.name) WHERE $2 OR b.subject IS NOT NULL GROUP BY n.name ORDER BY n.name`, u.Subject, admin)
 	if err != nil {
 		problem(w, 500, "database error")
@@ -225,7 +229,19 @@ func (a *App) namespaces(w http.ResponseWriter, r *http.Request, u actor) {
 			roles = []string{"admin"}
 		}
 		sort.Strings(roles)
-		items = append(items, map[string]any{"name": ns, "role": strings.Join(roles, ", "), "roles": roles, "permissions": permissionsFor(roles)})
+		permissions := []string{}
+		for _, permission := range permissionsFor(roles) {
+			if tokenAllows(r.Context(), ns, permission) {
+				permissions = append(permissions, permission)
+			}
+		}
+		if len(permissions) == 0 {
+			continue
+		}
+		if p := requestToken(r.Context()); p != nil {
+			roles = tokenRoles(p, ns)
+		}
+		items = append(items, map[string]any{"name": ns, "role": strings.Join(roles, ", "), "roles": roles, "permissions": permissions})
 	}
 	if rows.Err() != nil {
 		problem(w, 500, "database error")
@@ -281,7 +297,7 @@ func (a *App) setMember(w http.ResponseWriter, r *http.Request, u actor) {
 		return
 	}
 	var sub string
-	err := a.db.QueryRow(r.Context(), "SELECT p.subject FROM principals p LEFT JOIN users u USING(subject) WHERE p.subject=$1 OR u.username=$1 OR u.email=$1 ORDER BY (p.subject=$1) DESC LIMIT 1", r.PathValue("sub")).Scan(&sub)
+	err := a.db.QueryRow(r.Context(), "SELECT p.subject FROM principals p LEFT JOIN users u USING(subject) WHERE NOT p.disabled AND (p.subject=$1 OR u.username=$1 OR u.email=$1) ORDER BY (p.subject=$1) DESC LIMIT 1", r.PathValue("sub")).Scan(&sub)
 	if err != nil {
 		problem(w, 404, "user not found; external users must sign in first")
 		return

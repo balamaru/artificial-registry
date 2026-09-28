@@ -19,3 +19,9 @@ select[multiple]{min-height:150px;min-width:180px}dialog{border:1px solid #cdd8d
 #member-role-options input{width:17px;height:17px;flex-shrink:0;margin:0;accent-color:#187a64}
 #member-user-more{width:100%;font-size:12px;margin-top:5px}
 @media(max-width:760px){.member-form{grid-template-columns:1fr}.member-popup{max-height:260px}}
+
+#account-panel fieldset{border:1px solid #dce5e7;border-radius:7px;padding:14px;margin:16px 0;min-width:0}
+#account-panel .token-check{display:inline-flex;align-items:center;gap:8px;margin:6px 18px 6px 0;font-weight:400}
+#account-panel .token-check input{width:17px;height:17px;margin:0;accent-color:#187a64}
+#token-secret{font-family:monospace;width:100%}
+#token-grants{margin-top:16px}

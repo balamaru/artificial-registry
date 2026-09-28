@@ -90,3 +90,5 @@ Berkas ZIP dan metadata tersimpan dalam PostgreSQL (`bytea`). Untuk beban besar,
 `deploy/k8s/registry.yaml` adalah contoh Deployment dan Service. Ganti image dan buat Secret `artificial-registry-config` yang berisi `DATABASE_URL`, `PUBLIC_URL`, `AUTH_MODE`, serta konfigurasi autentikasi yang dijelaskan di docs/operations.md. Sediakan PostgreSQL secara terpisah serta ingress TLS. Image tidak membutuhkan environment variable lisensi.
 
 Jalankan `go test ./...` memakai Go 1.26 dan `docker compose up --build` untuk uji integrasi. Core service 2 belum termasuk versi ini.
+
+Pengelolaan akun kini mendukung role registry `user-delete`, ganti password sendiri, dan token CLI turunan dengan batas role/namespace/masa berlaku serta pencabutan berantai. Buka **My account & tokens** atau lihat [panduan akses dan token CLI](docs/access-control.md#token-cli-dan-token-turunan).

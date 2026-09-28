@@ -113,7 +113,7 @@ func New(ctx context.Context) (*App, error) {
 		db.Close()
 		return nil, err
 	}
-	for _, statement := range strings.Split(schema+authSchema+rbacSchema, ";") {
+	for _, statement := range strings.Split(schema+authSchema+rbacSchema+accountSchema, ";") {
 		if strings.TrimSpace(statement) == "" {
 			continue
 		}
@@ -165,7 +165,7 @@ func validPath(r *http.Request) bool {
 	return identifier.MatchString(r.PathValue("ns")) && (r.PathValue("skill") == "" || identifier.MatchString(r.PathValue("skill")))
 }
 func (a *App) log(ctx context.Context, u actor, action, ns, skill string, detail any) {
-	b, _ := json.Marshal(detail)
+	b, _ := json.Marshal(tokenAudit(ctx, detail))
 	_, _ = a.db.Exec(ctx, "INSERT INTO audit(subject,action,namespace,skill,detail) VALUES($1,$2,$3,$4,$5)", u.Subject, action, ns, skill, b)
 }
 func (a *App) createNamespace(w http.ResponseWriter, r *http.Request, u actor) {

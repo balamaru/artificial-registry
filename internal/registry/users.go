@@ -90,7 +90,7 @@ func (a *App) createUser(w http.ResponseWriter, r *http.Request, u actor) {
 		return
 	}
 	var v newUser
-	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&v) != nil || !v.validate() || (v.SystemRole != "" && v.SystemRole != "user" && v.SystemRole != "super-admin") {
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 64<<10)).Decode(&v) != nil || !v.validate() || (v.SystemRole != "" && v.SystemRole != "user" && v.SystemRole != "super-admin" && v.SystemRole != "user-delete") {
 		problem(w, 400, "valid email, username, password of 12–72 bytes, and system role required")
 		return
 	}
@@ -103,13 +103,14 @@ func (a *App) createUser(w http.ResponseWriter, r *http.Request, u actor) {
 	respond(w, 201, map[string]string{"subject": sub, "email": v.Email, "username": v.Username})
 }
 func (a *App) listUsers(w http.ResponseWriter, r *http.Request, u actor) {
-	if !a.systemAdmin(r.Context(), u) {
+	admin := a.systemAdmin(r.Context(), u)
+	if !a.canDeleteUsers(r, u) {
 		problem(w, 403, "super-admin required")
 		return
 	}
 	rows, err := a.db.Query(r.Context(), `SELECT p.subject,COALESCE(u.email,''),COALESCE(u.username,''),p.system_role,p.disabled,u.subject IS NOT NULL,
  COALESCE((SELECT jsonb_agg(jsonb_build_object('namespace',g.scope,'roles',g.roles) ORDER BY g.scope) FROM (SELECT scope,array_agg(role ORDER BY role) AS roles FROM role_bindings WHERE subject=p.subject GROUP BY scope) g),'[]'::jsonb)
- FROM principals p LEFT JOIN users u USING(subject) WHERE $1='' OR u.username ILIKE '%'||$1||'%' OR u.email ILIKE '%'||$1||'%' OR p.subject=$1 ORDER BY p.created_at,p.subject LIMIT $2 OFFSET $3`, r.URL.Query().Get("q"), pageLimit(r), pageOffset(r))
+ FROM principals p LEFT JOIN users u USING(subject) WHERE p.deleted_at IS NULL AND ($1='' OR u.username ILIKE '%'||$1||'%' OR u.email ILIKE '%'||$1||'%' OR p.subject=$1) ORDER BY p.created_at,p.subject LIMIT $2 OFFSET $3`, r.URL.Query().Get("q"), pageLimit(r), pageOffset(r))
 	if err != nil {
 		problem(w, 500, "database error")
 		return
@@ -123,6 +124,9 @@ func (a *App) listUsers(w http.ResponseWriter, r *http.Request, u actor) {
 		if rows.Scan(&sub, &email, &name, &role, &disabled, &local, &grants) != nil {
 			problem(w, 500, "database error")
 			return
+		}
+		if !admin {
+			grants = json.RawMessage("[]")
 		}
 		items = append(items, map[string]any{"subject": sub, "email": email, "username": name, "system_role": role, "disabled": disabled, "local": local, "grants": grants})
 	}
@@ -142,12 +146,12 @@ func (a *App) updateUser(w http.ResponseWriter, r *http.Request, u actor) {
 		Disabled   *bool  `json:"disabled"`
 		Password   string `json:"password"`
 	}
-	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&v) != nil || (v.SystemRole != "" && v.SystemRole != "user" && v.SystemRole != "super-admin") || (v.Password != "" && (len(v.Password) < 12 || len(v.Password) > 72)) {
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&v) != nil || (v.SystemRole != "" && v.SystemRole != "user" && v.SystemRole != "super-admin" && v.SystemRole != "user-delete") || (v.Password != "" && (len(v.Password) < 12 || len(v.Password) > 72)) {
 		problem(w, 400, "invalid account update")
 		return
 	}
 	sub := r.PathValue("sub")
-	if sub == u.Subject && (v.SystemRole == "user" || (v.Disabled != nil && *v.Disabled)) {
+	if sub == u.Subject && ((v.SystemRole != "" && v.SystemRole != "super-admin") || (v.Disabled != nil && *v.Disabled)) {
 		problem(w, 409, "cannot demote or disable yourself")
 		return
 	}
@@ -177,7 +181,7 @@ func (a *App) updateUser(w http.ResponseWriter, r *http.Request, u actor) {
 	}
 	var role string
 	var disabled bool
-	if tx.QueryRow(r.Context(), "SELECT system_role,disabled FROM principals WHERE subject=$1 FOR UPDATE", sub).Scan(&role, &disabled) != nil {
+	if tx.QueryRow(r.Context(), "SELECT system_role,disabled FROM principals WHERE subject=$1 AND deleted_at IS NULL FOR UPDATE", sub).Scan(&role, &disabled) != nil {
 		problem(w, 404, "user not found")
 		return
 	}
@@ -203,6 +207,10 @@ func (a *App) updateUser(w http.ResponseWriter, r *http.Request, u actor) {
 		return
 	}
 	if disabled || len(hash) > 0 {
+		if _, err = tx.Exec(r.Context(), "UPDATE personal_tokens SET revoked_at=COALESCE(revoked_at,now()) WHERE subject=$1", sub); err != nil {
+			problem(w, 500, "database error")
+			return
+		}
 		if _, err = tx.Exec(r.Context(), "DELETE FROM sessions WHERE subject=$1", sub); err != nil {
 			problem(w, 500, "database error")
 			return
@@ -233,7 +241,7 @@ func (a *App) userGrants(w http.ResponseWriter, r *http.Request, u actor) {
 	}
 	defer tx.Rollback(r.Context())
 	var sub string
-	if tx.QueryRow(r.Context(), "SELECT subject FROM principals WHERE subject=$1 FOR UPDATE", r.PathValue("sub")).Scan(&sub) != nil {
+	if tx.QueryRow(r.Context(), "SELECT subject FROM principals WHERE subject=$1 AND deleted_at IS NULL FOR UPDATE", r.PathValue("sub")).Scan(&sub) != nil {
 		problem(w, 404, "user not found")
 		return
 	}
