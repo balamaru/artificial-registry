@@ -2,6 +2,7 @@
 // containing a safe root SKILL.md. Use a disposable database, not production.
 const { chromium, expect } = require('playwright/test');
 const fs = require('node:fs');
+const bootstrapLogin = require('./bootstrap-login.cjs');
 
 (async () => {
   if (!process.env.ZIP_FIXTURE) throw new Error('ZIP_FIXTURE is required');
@@ -11,14 +12,8 @@ const fs = require('node:fs');
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     const suffix = Date.now().toString(36);
-    const username = `browser-${suffix}`, namespace = `ui-${suffix}`;
-    await page.goto(process.env.BASE_URL || 'http://localhost:8080');
-    await expect(page.getByRole('heading', { name: 'Create your account' })).toBeVisible();
-    await page.locator('#auth-form [name=email]').fill(`${username}@example.test`);
-    await page.locator('#auth-form [name=username]').fill(username);
-    await page.locator('#auth-form [name=password]').fill('browser-test-password');
-    await page.getByRole('button', { name: 'Create account', exact: true }).click();
-    await expect(page.locator('#workspace')).toBeVisible();
+    const username = 'admin', namespace = `ui-${suffix}`;
+    await bootstrapLogin(page, process.env.BASE_URL || 'http://localhost:8080', 'browser-test-password', 'admin@example.test');
     await page.getByRole('textbox', { name: 'New namespace' }).fill(namespace);
     await page.getByRole('button', { name: 'Create namespace', exact: true }).click();
     await expect(page.locator('#role')).toHaveText('admin');
@@ -53,7 +48,6 @@ const fs = require('node:fs');
     if (process.env.SCREENSHOT_DIR) await page.screenshot({ path: `${process.env.SCREENSHOT_DIR}/registry-mobile.png`, fullPage: true });
     await page.getByRole('button', { name: 'Sign out', exact: true }).click();
     await expect(page.locator('#auth')).toBeVisible();
-    await page.getByRole('button', { name: 'Already registered? Sign in', exact: true }).click();
     await page.locator('#auth-form [name=login]').fill(username);
     await page.locator('#auth-form [name=password]').fill('browser-test-password');
     await page.getByRole('button', { name: 'Sign in', exact: true }).click();
@@ -79,7 +73,6 @@ const fs = require('node:fs');
     const memberPage = await browser.newPage();
     memberPage.on('pageerror', e => errors.push(e.message));
     await memberPage.goto(process.env.BASE_URL || 'http://localhost:8080');
-    await memberPage.getByRole('button', { name: 'Already registered? Sign in', exact: true }).click();
     await memberPage.locator('#auth-form [name=login]').fill(memberName);
     await memberPage.locator('#auth-form [name=password]').fill('member-test-password');
     await memberPage.getByRole('button', { name: 'Sign in', exact: true }).click();
@@ -115,6 +108,6 @@ const fs = require('node:fs');
     if ((await memberPage.request.get(`${process.env.BASE_URL || 'http://localhost:8080'}/auth/me`)).status() !== 401) throw new Error('Disabled session still active');
     await memberPage.close();
     if (errors.length) throw new Error(`Browser errors: ${errors.join('; ')}`);
-    console.log('PASS: registration, namespace, upload, approval, download integrity, analytics, audit, members, mobile layout, logout, login, user creation, scoped/wildcard grants, read-only/write-only isolation, update quarantine, deletion, disabled sessions; no browser errors.');
+    console.log('PASS: bootstrap admin, mandatory password change, namespace, upload, approval, download integrity, analytics, audit, members, mobile layout, logout, login, user creation, scoped/wildcard grants, read-only/write-only isolation, update quarantine, deletion, disabled sessions; no browser errors.');
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exit(1); });

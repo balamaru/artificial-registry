@@ -3,6 +3,8 @@ package registry
 import (
 	"encoding/json"
 	"net/http"
+	"net/mail"
+	"strings"
 
 	"golang.org/x/crypto/bcrypt"
 )
@@ -91,12 +93,24 @@ func (a *App) changePassword(w http.ResponseWriter, r *http.Request, u actor) {
 		return
 	}
 	var v struct {
-		Current string `json:"current_password"`
-		New     string `json:"new_password"`
+		Current string  `json:"current_password"`
+		New     string  `json:"new_password"`
+		Email   *string `json:"email"`
 	}
 	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&v) != nil || len(v.Current) > 72 || len(v.New) < 12 || len(v.New) > 72 || v.Current == v.New {
 		problem(w, 400, "provide current password and a different new password of 12–72 bytes")
 		return
+	}
+	if v.Email != nil {
+		email := strings.ToLower(strings.TrimSpace(*v.Email))
+		v.Email = &email
+		if email != "" {
+			parsed, err := mail.ParseAddress(email)
+			if err != nil || parsed.Address != email || len(email) > 254 {
+				problem(w, 400, "invalid email")
+				return
+			}
+		}
 	}
 	tx, err := a.db.Begin(r.Context())
 	if err != nil {
@@ -118,8 +132,8 @@ func (a *App) changePassword(w http.ResponseWriter, r *http.Request, u actor) {
 		problem(w, 500, "password error")
 		return
 	}
-	if _, err = tx.Exec(r.Context(), "UPDATE users SET password_hash=$2 WHERE subject=$1", u.Subject, hash); err != nil {
-		problem(w, 500, "database error")
+	if _, err = tx.Exec(r.Context(), "UPDATE users SET password_hash=$2,must_change_password=false,email=CASE WHEN $3::text IS NULL THEN email ELSE NULLIF($3,'') END WHERE subject=$1", u.Subject, hash, v.Email); err != nil {
+		accountError(w, err)
 		return
 	}
 	if _, err = tx.Exec(r.Context(), "DELETE FROM sessions WHERE subject=$1", u.Subject); err != nil {

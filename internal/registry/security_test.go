@@ -107,7 +107,7 @@ func TestLocalModeCannotUseDevToken(t *testing.T) {
 	}
 }
 func TestUI(t *testing.T) {
-	a := &App{publicURL: "http://localhost:8080", mode: "local", registration: true}
+	a := &App{publicURL: "http://localhost:8080", mode: "local"}
 	h := a.Handler()
 	for _, p := range []string{"/", "/app.js", "/style.css", "/auth/config"} {
 		w := httptest.NewRecorder()

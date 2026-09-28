@@ -101,7 +101,11 @@ func (a *App) authenticatePAT(w http.ResponseWriter, r *http.Request, raw string
 		return
 	}
 	_, _ = a.db.Exec(r.Context(), "UPDATE personal_tokens SET last_used_at=now() WHERE id=$1", id)
-	next(w, r.WithContext(context.WithValue(r.Context(), tokenContextKey{}, policy)), actor{subject})
+	r = r.WithContext(context.WithValue(r.Context(), tokenContextKey{}, policy))
+	if !a.passwordGate(w, r, subject) {
+		return
+	}
+	next(w, r, actor{subject})
 }
 func tokenAudit(ctx context.Context, detail any) any {
 	if p := requestToken(ctx); p != nil {

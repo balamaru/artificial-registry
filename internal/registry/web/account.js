@@ -19,7 +19,7 @@ $('#hide-token').onclick = clearTokenSecret;
 form('#password-form', async (data, f) => {
  if (data.new_password !== data.confirmation) throw new Error('New passwords do not match.');
  await api('/auth/password', json('POST', { current_password: data.current_password, new_password: data.new_password }));
- f.reset(); registration = false; showAuth(); notify('Password changed. Sign in again with your new password. All previous sessions and tokens have been revoked.');
+ f.reset(); showAuth(); notify('Password changed. Sign in again with your new password. All previous sessions and tokens have been revoked.');
 });
 function checks(target, names) {
  const container = $(target); container.querySelectorAll('label').forEach(e => e.remove());

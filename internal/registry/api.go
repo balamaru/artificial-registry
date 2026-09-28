@@ -13,7 +13,7 @@ var web embed.FS
 
 func (a *App) routes(m *http.ServeMux) {
 	m.HandleFunc("GET /auth/config", func(w http.ResponseWriter, r *http.Request) {
-		respond(w, 200, map[string]any{"local": a.mode != "oidc", "registration": a.registration && a.mode != "oidc", "oidc": a.oauth != nil})
+		respond(w, 200, map[string]any{"local": true, "registration": false, "oidc_only": a.mode == "oidc", "oidc": a.oauth != nil})
 	})
 	m.HandleFunc("POST /auth/register", a.register)
 	m.HandleFunc("POST /auth/login", a.login)

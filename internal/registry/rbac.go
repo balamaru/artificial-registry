@@ -104,7 +104,7 @@ func (a *App) canCreateNamespace(ctx context.Context, u actor) bool {
 	return yes
 }
 
-// The same advisory lock serializes local registration and first external login.
+// Serialize explicit account creation and bootstrap ownership.
 func ensurePrincipal(ctx context.Context, tx pgx.Tx, subject string) error {
 	if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(741923106)"); err != nil {
 		return err
@@ -138,7 +138,7 @@ func (a *App) serveActor(w http.ResponseWriter, r *http.Request, subject string,
 				return
 			}
 			defer tx.Rollback(r.Context())
-			if ensurePrincipal(r.Context(), tx, subject) != nil || tx.Commit(r.Context()) != nil {
+			if _, err = tx.Exec(r.Context(), "INSERT INTO principals(subject) VALUES($1) ON CONFLICT DO NOTHING", subject); err != nil || tx.Commit(r.Context()) != nil {
 				problem(w, 503, "authentication unavailable")
 				return
 			}
@@ -147,6 +147,9 @@ func (a *App) serveActor(w http.ResponseWriter, r *http.Request, subject string,
 	var disabled bool
 	if a.db.QueryRow(r.Context(), "SELECT disabled FROM principals WHERE subject=$1", subject).Scan(&disabled) != nil || disabled {
 		problem(w, 401, "account disabled or unavailable")
+		return
+	}
+	if !a.passwordGate(w, r, subject) {
 		return
 	}
 	next(w, r, actor{subject})

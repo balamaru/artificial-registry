@@ -1,10 +1,10 @@
 'use strict';
 const $ = s => document.querySelector(s);
-let config, registration = true, namespaces = [], current, user, offset = 0, roleCatalog = {}, usersOffset = 0, selectedUser = null, updateTarget = null;
+let config, namespaces = [], current, user, offset = 0, roleCatalog = {}, usersOffset = 0, selectedUser = null, updateTarget = null;
 function notify(text, error = false) { const box = $('#message'); box.textContent = text; box.className = error ? 'error' : ''; box.hidden = false; }
 async function api(path, options = {}) {
  const response = await fetch(path, { ...options, headers: { 'X-Registry-CSRF': '1', ...options.headers } });
- if (!response.ok) { let body; try { body = await response.json(); } catch { body = {}; } if (response.status === 401 && !path.startsWith('/auth/')) showAuth(); throw new Error(body.error || `Request failed (${response.status})`); }
+ if (!response.ok) { let body; try { body = await response.json(); } catch { body = {}; } if (body.code === 'password_change_required') { await load(); } if (response.status === 401 && !path.startsWith('/auth/')) showAuth(); throw new Error(body.error || `Request failed (${response.status})`); }
  if (response.status === 204) return null;
  return response.json();
 }
@@ -15,25 +15,25 @@ function action(label, fn) { const b = el('button', label); b.onclick = () => ru
 async function run(button, fn) { button.disabled = true; try { await fn(); } catch (e) { notify(e.message, true); } finally { button.disabled = button.id === "previous" ? offset === 0 : button.id === "next" ? $("#skills").querySelectorAll("article").length < 12 : button.id === "users-previous" ? usersOffset === 0 : button.id === "users-next" ? $("#users-list").querySelectorAll("tbody tr").length < 25 : false; } }
 function form(id, fn) { $(id).onsubmit = e => { e.preventDefault(); const f = e.currentTarget; run(f.querySelector('button[type=submit], button:not([type])'), () => fn(Object.fromEntries(new FormData(f)), f)); }; }
 function showAuth() {
- resetMemberPicker(); clearAccount();
+ resetMemberPicker(); clearAccount(); $('#first-login').hidden = true; $('#first-login-form').reset();
  $('#workspace').hidden = true; $('#auth').hidden = false; $('#logout').hidden = true; $('#identity').textContent = ''; $('#users-panel').hidden = true; selectedUser = null;
- $('#auth-form').hidden = !config.local; $('#sso').hidden = !config.oidc; $('#auth-toggle').hidden = !config.local || !config.registration;
- registration = registration && config.registration; renderAuth();
+ $('#sso').hidden = !config.oidc;
+ $('#auth-description').textContent = config.oidc ? 'Use SSO for your organization account, or sign in as the local administrator.' : 'Request an account from your administrator. Self-registration is disabled.';
 }
-function renderAuth() {
- $('#auth-title').textContent = !config.local ? 'Sign in with SSO' : registration ? 'Create your account' : 'Welcome back';
- $('#auth-description').textContent = !config.local ? 'Continue with your organization’s identity provider.' : registration ? 'Start with your email, username, and password.' : 'Sign in to your private skill registry.';
- for (const name of ['email', 'username']) { $(`#${name}-field`).hidden = !registration; $(`[name=${name}]`).required = registration; }
- $('#login-field').hidden = registration; $('[name=login]').required = !registration;
- $('[name=password]').minLength = registration ? 12 : 1; $('[name=password]').autocomplete = registration ? 'new-password' : 'current-password';
- $('#auth-submit').textContent = registration ? 'Create account' : 'Sign in'; $('#auth-toggle').textContent = registration ? 'Already registered? Sign in' : 'New here? Create account';
+function showFirstLogin() {
+ clearAccount(); $('#auth').hidden = true; $('#workspace').hidden = true; $('#first-login').hidden = false; $('#logout').hidden = false;
+ $('#identity').textContent = user.username; $('#first-login-form [name=email]').value = user.email || '';
 }
-$('#auth-toggle').onclick = () => { registration = !registration; renderAuth(); };
-form('#auth-form', async (data, f) => { await api(registration ? '/auth/register' : '/auth/login', json('POST', data)); f.reset(); $('#message').hidden = true; await load(); });
+form('#auth-form', async (data, f) => { await api('/auth/login', json('POST', data)); f.reset(); $('#message').hidden = true; await load(); });
+form('#first-login-form', async (data, f) => {
+ if (data.new_password !== data.confirmation) throw new Error('New passwords do not match.');
+ await api('/auth/password', json('POST', {current_password:data.current_password,new_password:data.new_password,email:data.email}));
+ f.reset(); showAuth(); notify('Password changed. Sign in again with your new password.');
+});
 $('#logout').onclick = () => run($('#logout'), async () => { await api('/auth/logout', { method: 'POST' }); showAuth(); });
 async function load() {
  clearTokenSecret();
- user = await api('/auth/me'); roleCatalog = await api('/v1/roles'); populateRoles(); $('#manage-users').hidden = !user.can_delete_users; $('#account-panel').hidden = true; $('#namespace-form').hidden = !user.can_create_namespace; $('#registry-view').hidden = false; $('#users-panel').hidden = true; $('#back-registry').hidden = true; $('#identity').textContent = `${user.username || 'SSO user'} · ${user.subject}`; $('#logout').hidden = false; $('#auth').hidden = true; $('#workspace').hidden = false;
+ user = await api('/auth/me'); if (user.must_change_password) { showFirstLogin(); return; } $('#first-login').hidden = true; roleCatalog = await api('/v1/roles'); populateRoles(); $('#manage-users').hidden = !user.can_delete_users; $('#account-panel').hidden = true; $('#namespace-form').hidden = !user.can_create_namespace; $('#registry-view').hidden = false; $('#users-panel').hidden = true; $('#back-registry').hidden = true; $('#identity').textContent = `${user.username || 'SSO user'} · ${user.subject}`; $('#logout').hidden = false; $('#auth').hidden = true; $('#workspace').hidden = false;
  namespaces = await api('/v1/namespaces'); const previous = current?.name; $('#namespace').replaceChildren();
  for (const ns of namespaces) { const option = el('option', ns.name); option.value = ns.name; $('#namespace').append(option); }
  current = namespaces.find(n => n.name === previous) || namespaces[0]; if (current) $('#namespace').value = current.name;
@@ -105,7 +105,7 @@ form('#update-form', async (data, f) => {
  await api(updateTarget.path, { method: 'PUT', headers: { 'Content-Type': 'application/zip', 'If-Match': updateTarget.sha256 }, body: data.bundle }); $('#update-dialog').close(); f.reset(); await skills(); notify('Updated and quarantined. Review and approve the new content.');
 });
 $('#manage-users').onclick = () => run($('#manage-users'), async () => {
- $('#account-panel').hidden = true; clearTokenSecret(); $('#registry-view').hidden = true; $('#users-panel').hidden = false; $('#back-registry').hidden = false; $('#create-user-card').hidden = !config.local || !user.can_admin_users; $('#admin-audit-card').hidden = !user.can_admin_users;
+ $('#account-panel').hidden = true; clearTokenSecret(); $('#registry-view').hidden = true; $('#users-panel').hidden = false; $('#back-registry').hidden = false; $('#create-user-card').hidden = config.oidc_only || !user.can_admin_users; $('#admin-audit-card').hidden = !user.can_admin_users;
  const scope = $('#grant-form [name=namespace]'); scope.replaceChildren(); for (const ns of [{ name: '*' }, ...namespaces]) { const option = el('option', ns.name === '*' ? 'All namespaces (including future)' : ns.name); option.value = ns.name; scope.append(option); }
  usersOffset = 0; await users();
 });

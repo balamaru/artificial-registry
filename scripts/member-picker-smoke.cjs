@@ -1,5 +1,6 @@
 // Run against an empty, disposable registry database with Playwright installed.
 const { chromium, expect } = require('playwright/test');
+const bootstrapLogin = require('./bootstrap-login.cjs');
 (async () => {
  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] });
  try {
@@ -7,8 +8,7 @@ const { chromium, expect } = require('playwright/test');
   const errors = []; page.on('pageerror', e => errors.push(e.message));
   const base = process.env.BASE_URL || 'http://localhost:8080';
   const headers = { 'X-Registry-CSRF': '1' };
-  const register = await page.request.post(`${base}/auth/register`, { data: { username: 'owner', email: 'owner@example.test', password: 'member-picker-password' }, headers });
-  if (register.status() !== 201) throw new Error(await register.text());
+  await bootstrapLogin(page, base, 'member-picker-password');
   const ns = await page.request.post(`${base}/v1/namespaces`, { data: { name: 'team' }, headers });
   if (ns.status() !== 201) throw new Error(await ns.text());
   const subjects = {};

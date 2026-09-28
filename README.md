@@ -6,28 +6,28 @@ Registry privat AI skill dalam satu layanan Go dengan PostgreSQL.
 
 1. Salin `.env.example` menjadi `.env`, lalu ganti `POSTGRES_PASSWORD` dengan password acak (gunakan karakter URL-safe).
 2. Jalankan `docker compose up --build`.
-3. Buka **http://localhost:8080**. Registrasi dengan **email, username, dan password** (minimal 12 karakter), Akun pertama otomatis menjadi **super-admin**, lalu dapat membuat namespace dan menambahkan user melalui **Users & access**.
+3. Lihat `docker compose logs registry`: instalasi baru mencetak `BOOTSTRAP ADMIN username=admin temporary_password=...` satu kali. Buka **http://localhost:8080**, login sebagai **admin** dengan password tersebut, lalu wajib mengganti password (minimal 12 byte); email boleh dikosongkan. Login ulang, lalu buat namespace dan akun user melalui **Users & access**. Registrasi mandiri ditutup.
 4. Upload ZIP dengan `SKILL.md` di root. Tinjau hasil scan, approve versi yang bersih, lalu unduh dari UI.
 
 Semua fitur yang tersedia gratis tanpa license key: core service **1** (scan statis/prompt, advisori dependency, trust score) dan **3** (telemetry, analytics, estimasi savings). Core service **2** (runtime sandbox) dikecualikan.
 
 UI mencakup pencarian/filter/pagination skill, hasil scan, approve/reject/rescan, namespace, anggota/RBAC, administrasi user, role per namespace/semua namespace, update/delete skill, analytics, audit, dan logout. Tidak membutuhkan Node.js atau CDN. Data disimpan di PostgreSQL.
 
-Default `AUTH_MODE=local`. Gunakan `hybrid` untuk login lokal + SSO atau `oidc` untuk SSO saja. Isi `OIDC_ISSUER`, `OIDC_CLIENT_ID`, opsional `OIDC_CLIENT_SECRET` dan `OIDC_AUDIENCE`. Callback: `${PUBLIC_URL}/auth/oidc/callback`. Keycloak dan provider OIDC kompatibel lainnya didukung. Panduan konfigurasi, keamanan, dan pengujian: [docs/operations.md](docs/operations.md).
+Default `AUTH_MODE=local`. Gunakan `hybrid` untuk login lokal + SSO atau `oidc` untuk user SSO dengan pengecualian login lokal administrator. Isi `OIDC_ISSUER`, `OIDC_CLIENT_ID`, opsional `OIDC_CLIENT_SECRET` dan `OIDC_AUDIENCE`. Callback: `${PUBLIC_URL}/auth/oidc/callback`. Keycloak dan provider OIDC kompatibel lainnya didukung. Panduan konfigurasi, keamanan, dan pengujian: [docs/operations.md](docs/operations.md).
 
 `SCAN_OSV=true` (default Compose) mengirim nama/versi dependency ke API OSV gratis untuk pemeriksaan advisori; source tidak dikirim. Untuk uji offline set `SCAN_OSV=false`. Mode offline hanya menjalankan aturan statis dan menampilkan batas cakupan tersebut pada hasil scan.
 
-Contoh API lokal menggunakan session cookie:
+Contoh API lokal setelah mengganti password awal di UI, menggunakan session cookie:
 
 ```sh
 curl -c cookies.txt -H 'Content-Type: application/json' \
-  -d '{"email":"tester@example.com","username":"tester","password":"change-this-password"}' \
-  http://localhost:8080/auth/register
+  -d '{"login":"admin","password":"your-new-admin-password"}' \
+  http://localhost:8080/auth/login
 curl -b cookies.txt -H 'X-Registry-CSRF: 1' -H 'Content-Type: application/json' \
   -d '{"name":"platform"}' http://localhost:8080/v1/namespaces
 ```
 
-Untuk script lama, mode `dev` tetap mendukung `Authorization: Bearer $DEV_TOKEN`, jika token minimal 24 karakter dikonfigurasi. Mode ini hanya untuk pengujian lokal. Mode OIDC/hybrid mendukung bearer token provider dengan audience yang sesuai.
+Untuk script lama, mode `dev` tetap mendukung `Authorization: Bearer $DEV_TOKEN`, jika token minimal 24 karakter dikonfigurasi. Identitas dev-user tetap perlu diberikan grant oleh administrator. Mode ini hanya untuk pengujian lokal. Mode OIDC/hybrid mendukung bearer token provider dengan audience yang sesuai.
 
 ## Administrasi user dan akses
 

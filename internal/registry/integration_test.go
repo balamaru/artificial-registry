@@ -3,31 +3,16 @@ package registry
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"os"
 	"strings"
 	"testing"
 )
 
 // Run only against a disposable database: TEST_DATABASE_URL=... go test ./...
 func TestRegistryIntegration(t *testing.T) {
-	dsn := os.Getenv("TEST_DATABASE_URL")
-	if dsn == "" {
-		t.Skip("set TEST_DATABASE_URL to run PostgreSQL integration tests")
-	}
-	t.Setenv("DATABASE_URL", dsn)
-	t.Setenv("AUTH_MODE", "local")
-	t.Setenv("PUBLIC_URL", "http://localhost:8080")
-	t.Setenv("REGISTRATION_ENABLED", "true")
-	t.Setenv("SCAN_OSV", "false")
-	a, err := New(context.Background())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer a.Close()
+	a := testApp(t)
 	h := a.Handler()
 	testIP := randomToken()[:12]
 	request := func(method, path string, body []byte, cookie *http.Cookie, status int) *httptest.ResponseRecorder {
@@ -51,14 +36,8 @@ func TestRegistryIntegration(t *testing.T) {
 	}
 	suffix := randomToken()[:10]
 	signup := func(name string) (*http.Cookie, string) {
-		w := request("POST", "/auth/register", []byte(fmt.Sprintf(`{"email":"%s@example.test","username":"%s","password":"a-long-test-password"}`, name, name)), nil, 201)
-		var profile map[string]string
-		json.Unmarshal(w.Body.Bytes(), &profile)
-		cookies := w.Result().Cookies()
-		if len(cookies) == 0 {
-			t.Fatal("missing session")
-		}
-		return cookies[0], profile["subject"]
+		w, subject := provisionFixture(t, a, name, "a-long-test-password", "user")
+		return w.Result().Cookies()[0], subject
 	}
 	owner, subject := signup("owner-" + suffix)
 	if _, err := a.db.Exec(context.Background(), "UPDATE principals SET system_role='super-admin' WHERE subject=$1", subject); err != nil {
@@ -73,7 +52,7 @@ func TestRegistryIntegration(t *testing.T) {
 	if err := a.db.QueryRow(context.Background(), "SELECT password_hash FROM users WHERE subject=$1", subject).Scan(&hash); err != nil || !strings.HasPrefix(string(hash), "$2") {
 		t.Fatal("password not hashed")
 	}
-	request("POST", "/auth/register", []byte(fmt.Sprintf(`{"email":"owner-%s@example.test","username":"duplicate","password":"a-long-test-password"}`, suffix)), nil, 409)
+	request("POST", "/v1/admin/users", []byte(fmt.Sprintf(`{"email":"owner-%s@example.test","username":"duplicate","password":"a-long-test-password"}`, suffix)), owner, 409)
 	request("POST", "/auth/login", []byte(fmt.Sprintf(`{"login":"owner-%s","password":"wrong"}`, suffix)), nil, 401)
 	w := request("POST", "/auth/login", []byte(fmt.Sprintf(`{"login":"owner-%s","password":"a-long-test-password"}`, suffix)), nil, 200)
 	owner = w.Result().Cookies()[0]

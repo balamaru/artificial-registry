@@ -13,6 +13,9 @@ import (
 func TestMemberCandidates(t *testing.T) {
 	a := testApp(t)
 	ctx := context.Background()
+	if _, err := a.db.Exec(ctx, "UPDATE principals SET disabled=true WHERE subject IN (SELECT subject FROM users WHERE username='admin')"); err != nil {
+		t.Fatal(err)
+	}
 	for _, subject := range []string{"aaaa", "bbb", "external-j", "jhoen", "disabled"} {
 		if _, err := a.db.Exec(ctx, "INSERT INTO principals(subject,disabled) VALUES($1,$2)", subject, subject == "disabled"); err != nil {
 			t.Fatal(err)

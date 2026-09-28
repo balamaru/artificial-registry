@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"regexp"
@@ -34,7 +35,7 @@ type App struct {
 	db                        *pgxpool.Pool
 	verifier, loginVerifier   *oidc.IDTokenVerifier
 	devToken, mode, publicURL string
-	registration, osvEnabled  bool
+	osvEnabled                bool
 	oauth                     *oauth2.Config
 }
 type actor struct{ Subject string }
@@ -66,7 +67,7 @@ func New(ctx context.Context) (*App, error) {
 	if err := validatePublicURL(publicURL); err != nil {
 		return nil, err
 	}
-	app := &App{mode: mode, publicURL: publicURL, registration: os.Getenv("REGISTRATION_ENABLED") != "false", osvEnabled: os.Getenv("SCAN_OSV") == "true"}
+	app := &App{mode: mode, publicURL: publicURL, osvEnabled: os.Getenv("SCAN_OSV") == "true"}
 	if mode == "dev" {
 		app.devToken = os.Getenv("DEV_TOKEN")
 		if len(app.devToken) < 24 {
@@ -113,7 +114,7 @@ func New(ctx context.Context) (*App, error) {
 		db.Close()
 		return nil, err
 	}
-	for _, statement := range strings.Split(schema+authSchema+rbacSchema+accountSchema, ";") {
+	for _, statement := range strings.Split(schema+authSchema+rbacSchema+accountSchema+bootstrapSchema, ";") {
 		if strings.TrimSpace(statement) == "" {
 			continue
 		}
@@ -123,11 +124,20 @@ func New(ctx context.Context) (*App, error) {
 			return nil, err
 		}
 	}
+	initialPassword, err := bootstrapAdmin(ctx, tx)
+	if err != nil {
+		_ = tx.Rollback(ctx)
+		db.Close()
+		return nil, err
+	}
 	if err = tx.Commit(ctx); err != nil {
 		db.Close()
 		return nil, err
 	}
 
+	if initialPassword != "" {
+		log.Printf("BOOTSTRAP ADMIN username=admin temporary_password=%s (change required at first login; printed only once)", initialPassword)
+	}
 	app.db = db
 	return app, nil
 }

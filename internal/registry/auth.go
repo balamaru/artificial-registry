@@ -136,39 +136,12 @@ func (a *App) authLimit(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 func (a *App) register(w http.ResponseWriter, r *http.Request) {
-	if a.mode == "oidc" || !a.registration {
-		problem(w, 403, "local registration disabled")
-		return
-	}
-	if !a.authLimit(w, r) {
-		return
-	}
-	var v newUser
-	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&v) != nil || !v.validate() {
-		problem(w, 400, "valid email, username, and password of 12–72 bytes required")
-		return
-	}
-	// Public registration cannot assign roles or grants.
-	v.SystemRole = ""
-	v.Grants = nil
-	sub, err := a.createLocalAccount(r.Context(), v, nil)
-	if err != nil {
-		accountError(w, err)
-		return
-	}
-	if a.newSession(w, r, sub) {
-		respond(w, 201, map[string]string{"subject": sub, "username": v.Username, "email": v.Email})
-	}
-
+	problem(w, 403, "self-registration is disabled; request access from your administrator")
 }
 
 var dummyHash, _ = bcrypt.GenerateFromPassword([]byte("dummy-password-for-timing"), 12)
 
 func (a *App) login(w http.ResponseWriter, r *http.Request) {
-	if a.mode == "oidc" {
-		problem(w, 403, "use SSO login")
-		return
-	}
 	if !a.authLimit(w, r) {
 		return
 	}
@@ -179,7 +152,7 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 	}
 	var sub string
 	var hash []byte
-	err := a.db.QueryRow(r.Context(), "SELECT u.subject,u.password_hash FROM users u JOIN principals p USING(subject) WHERE (email=$1 OR username=$1) AND NOT p.disabled", strings.ToLower(strings.TrimSpace(v.Login))).Scan(&sub, &hash)
+	err := a.db.QueryRow(r.Context(), "SELECT u.subject,u.password_hash FROM users u JOIN principals p USING(subject) WHERE (email=$1 OR username=$1) AND NOT p.disabled AND ($2 OR p.system_role='super-admin')", strings.ToLower(strings.TrimSpace(v.Login)), a.mode != "oidc").Scan(&sub, &hash)
 	if err != nil {
 		hash = dummyHash
 	}
@@ -194,10 +167,12 @@ func (a *App) login(w http.ResponseWriter, r *http.Request) {
 }
 func (a *App) me(w http.ResponseWriter, r *http.Request, u actor) {
 	var email, username string
-	_ = a.db.QueryRow(r.Context(), "SELECT email,username FROM users WHERE subject=$1", u.Subject).Scan(&email, &username)
+	_ = a.db.QueryRow(r.Context(), "SELECT COALESCE(email,''),username FROM users WHERE subject=$1", u.Subject).Scan(&email, &username)
+	var required bool
+	_ = a.db.QueryRow(r.Context(), "SELECT EXISTS(SELECT 1 FROM users WHERE subject=$1 AND must_change_password)", u.Subject).Scan(&required)
 	var role string
 	_ = a.db.QueryRow(r.Context(), "SELECT system_role FROM principals WHERE subject=$1", u.Subject).Scan(&role)
-	respond(w, 200, map[string]any{"subject": u.Subject, "email": email, "username": username, "system_role": role, "local": username != "", "can_admin_users": a.systemAdmin(r.Context(), u), "can_delete_users": a.canDeleteUsers(r, u), "can_create_namespace": a.canCreateNamespace(r.Context(), u)})
+	respond(w, 200, map[string]any{"subject": u.Subject, "email": email, "username": username, "system_role": role, "local": username != "", "must_change_password": required, "can_admin_users": a.systemAdmin(r.Context(), u), "can_delete_users": a.canDeleteUsers(r, u), "can_create_namespace": a.canCreateNamespace(r.Context(), u)})
 }
 func (a *App) logout(w http.ResponseWriter, r *http.Request, u actor) {
 	if c, err := r.Cookie("registry_session"); err == nil {

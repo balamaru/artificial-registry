@@ -45,10 +45,14 @@ func decodeAccount(t *testing.T, w *httptest.ResponseRecorder) map[string]any {
 	}
 	return v
 }
-func (c accountClient) register(name string) (accountClient, string) {
+func (c accountClient) provision(name string) (accountClient, string) {
 	c.t.Helper()
-	v := c.request("POST", "/auth/register", map[string]any{"email": name + "@example.test", "username": name, "password": "original-password"}, 201)
-	return accountClient{t: c.t, app: c.app, cookie: v.Result().Cookies()[0]}, decodeAccount(c.t, v)["subject"].(string)
+	role := "user"
+	if name == "owner" {
+		role = "super-admin"
+	}
+	w, subject := provisionFixture(c.t, c.app, name, "original-password", role)
+	return accountClient{t: c.t, app: c.app, cookie: w.Result().Cookies()[0]}, subject
 }
 func tokenRequest(name, ns, role, parent string) map[string]any {
 	grants := []grant{}
@@ -65,7 +69,7 @@ func (c accountClient) mint(v map[string]any) (accountClient, map[string]any) {
 func TestPersonalTokenDelegation(t *testing.T) {
 	a := testApp(t)
 	anon := accountClient{t: t, app: a}
-	admin, adminID := anon.register("owner")
+	admin, adminID := anon.provision("owner")
 	admin.request("POST", "/v1/namespaces", map[string]string{"name": "alpha"}, 201)
 	admin.request("POST", "/v1/namespaces", map[string]string{"name": "beta"}, 201)
 	root, rootInfo := admin.mint(tokenRequest("root", "alpha", "admin", ""))
@@ -147,9 +151,9 @@ func TestPersonalTokenDelegation(t *testing.T) {
 func TestDeleteUserAndPassword(t *testing.T) {
 	a := testApp(t)
 	anon := accountClient{t: t, app: a}
-	admin, adminID := anon.register("owner")
-	deleter, deleterID := anon.register("operator")
-	ordinary, ordinaryID := anon.register("normal")
+	admin, adminID := anon.provision("owner")
+	deleter, deleterID := anon.provision("operator")
+	ordinary, ordinaryID := anon.provision("normal")
 	admin.request("PATCH", "/v1/admin/users/"+deleterID, map[string]any{"system_role": "user-delete"}, 204)
 	admin.request("POST", "/v1/namespaces", map[string]string{"name": "alpha"}, 201)
 	admin.request("PUT", "/v1/admin/users/"+ordinaryID+"/grants", map[string]any{"grants": []grant{{"alpha", []string{"admin"}}}}, 204)
@@ -203,8 +207,8 @@ func TestDeleteUserAndPassword(t *testing.T) {
 func TestTokenOwnershipResetAndDepth(t *testing.T) {
 	a := testApp(t)
 	anon := accountClient{t: t, app: a}
-	admin, _ := anon.register("owner")
-	other, otherID := anon.register("other")
+	admin, _ := anon.provision("owner")
+	other, otherID := anon.provision("other")
 	admin.request("POST", "/v1/namespaces", map[string]string{"name": "alpha"}, 201)
 	root, info := admin.mint(tokenRequest("root", "*", "admin", ""))
 	other.request("POST", "/auth/tokens", tokenRequest("stolen", "alpha", "read-only", info["id"].(string)), 404)

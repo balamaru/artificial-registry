@@ -80,15 +80,15 @@ func TestScopedRolesAndAdministration(t *testing.T) {
 		}
 		return w
 	}
-	reg := request("POST", "/auth/register", []byte(`{"email":"owner@example.test","username":"owner","password":"a-long-password"}`), nil, 201, "")
+	reg, ownerID := provisionFixture(t, a, "owner", "a-long-password", "super-admin")
 	admin := reg.Result().Cookies()[0]
-	var first map[string]string
-	json.Unmarshal(reg.Body.Bytes(), &first)
+	first := map[string]string{"subject": ownerID}
 	me := request("GET", "/auth/me", nil, admin, 200, "")
 	if !strings.Contains(me.Body.String(), `"system_role":"super-admin"`) {
 		t.Fatal("first user was not promoted")
 	}
-	otherReg := request("POST", "/auth/register", []byte(`{"email":"attacker@example.test","username":"attacker","password":"a-long-password","system_role":"super-admin","grants":[{"namespace":"*","roles":["admin"]}]}`), nil, 201, "")
+	request("POST", "/auth/register", []byte(`{"username":"attacker","system_role":"super-admin"}`), nil, 403, "")
+	otherReg, _ := provisionFixture(t, a, "attacker", "a-long-password", "user")
 	attacker := otherReg.Result().Cookies()[0]
 	profile := request("GET", "/auth/me", nil, attacker, 200, "")
 	if strings.Contains(profile.Body.String(), `"system_role":"super-admin"`) {
@@ -210,11 +210,10 @@ func TestScopedRolesAndAdministration(t *testing.T) {
 	if strings.Contains(audit.Body.String(), "new-long-password") || strings.Contains(audit.Body.String(), "a-long-password") {
 		t.Fatal("password in audit")
 	}
-	a.registration = false
 	request("POST", "/auth/register", []byte(`{}`), nil, 403, "")
 	request("POST", "/v1/admin/users", []byte(`{"email":"closed@example.test","username":"closed","password":"a-long-password"}`), admin, 201, "")
 }
-func TestConcurrentFirstUser(t *testing.T) {
+func TestConcurrentPublicRegistrationDenied(t *testing.T) {
 	a := testApp(t)
 	var wg sync.WaitGroup
 	statuses := make(chan int, 2)
@@ -231,7 +230,7 @@ func TestConcurrentFirstUser(t *testing.T) {
 	wg.Wait()
 	close(statuses)
 	for s := range statuses {
-		if s != 201 {
+		if s != 403 {
 			t.Fatalf("registration status %d", s)
 		}
 	}

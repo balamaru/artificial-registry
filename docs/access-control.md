@@ -2,11 +2,13 @@
 
 ## Akun pertama dan upgrade
 
-Akun pertama pada database baru otomatis menjadi **super-admin registry**. Pembuatan akun pertama diserialisasi dalam transaksi PostgreSQL, sehingga dua registrasi bersamaan tidak menghasilkan dua super-admin bootstrap. Akun yang diregistrasikan berikutnya selalu menjadi user biasa, walaupun request mencoba menyertakan role atau grant.
+Pada database baru, aplikasi membuat akun lokal **admin** dengan role **super-admin**, email kosong, dan password acak 128-bit. Password dicetak sekali sesudah transaksi bootstrap berhasil, melalui log `BOOTSTRAP ADMIN username=admin temporary_password=...`. Jalankan `docker compose logs registry` untuk melihatnya. Startup beberapa replica tetap menghasilkan satu akun dan satu pesan password.
+
+Login pertama membuka formulir wajib ganti password (12–72 byte); email opsional. Backend menolak semua endpoint registry dan pembuatan token sampai password diganti, termasuk bila UI dilewati. Hanya profil, ganti password, dan logout tersedia. Password baru harus berbeda; perubahan mencabut sesi awal dan user login ulang. Password log tidak disimpan dalam plaintext di database dan tidak dicetak ulang ketika restart. Jaga akses log instalasi.
 
 Pada upgrade, akun lokal tertua dipromosikan menjadi super-admin; apabila tidak ada akun lokal, admin namespace existing dengan namespace tertua digunakan; role reader/publisher tidak dipromosikan melalui fallback ini. Membership `reader`, `publisher`, dan `admin` existing disalin sekali ke model grant baru. Migrasi tidak mengembalikan grant yang sudah dicabut ketika aplikasi restart. Session dan paket existing dipertahankan. Backup database sebelum upgrade, lalu jalankan `docker compose up -d --build`; tidak perlu menghapus volume PostgreSQL.
 
-Untuk instalasi OIDC baru tanpa akun existing, identitas pertama yang berhasil diautentikasi menjadi super-admin. Batasi siapa yang dapat login ke client OIDC ketika melakukan bootstrap. Setelah bootstrap, super-admin dapat mempromosikan user lain. Namespace admin **tidak** otomatis menjadi super-admin registry.
+Aturan bootstrap admin lokal berlaku juga untuk **OIDC/hybrid**. User lain tetap mengikuti provider OIDC yang dikonfigurasi: login pertama membuat identitas registry dengan role **user**, tanpa grant namespace. Tidak ada promosi super-admin dari login OIDC pertama. Administrator memberi role/grant setelah user muncul. Mode `oidc` menyediakan login lokal hanya bagi akun lokal super-admin; user biasa login melalui provider. Password user OIDC tetap dikelola provider.
 
 ## Pengelolaan pengguna
 
@@ -19,7 +21,7 @@ Login sebagai super-admin, pilih **Users & access**:
 
 Super-admin selalu memiliki seluruh akses namespace dan administrasi pengguna. User biasa memperoleh akses hanya melalui grant. Menonaktifkan akun atau reset password mencabut seluruh session dan token CLI user tersebut. Status disabled juga diperiksa ketika menggunakan bearer token OIDC. Super-admin tidak dapat menonaktifkan atau menurunkan role dirinya sendiri; ini mencegah kehilangan admin terakhir. Password tidak dikembalikan melalui API dan tidak ditulis ke audit.
 
-Registrasi mandiri masih mengikuti `REGISTRATION_ENABLED`. Set `false` setelah bootstrap bila semua akun berikutnya harus dibuat admin; **Add user** tetap tersedia. Pada `AUTH_MODE=oidc`, akun/password dibuat di provider. User muncul dalam administrasi registry setelah login pertama, lalu grant dapat diberikan.
+Registrasi mandiri lokal ditutup permanen: UI hanya menampilkan login, dan `POST /auth/register` selalu mengembalikan 403. Variabel lama `REGISTRATION_ENABLED` diabaikan, termasuk jika bernilai true. User lokal baru meminta akun kepada administrator; administrator membuatnya melalui **Add user**, lalu menetapkan role namespace atau scope `*`. Pada mode `oidc`, user biasa tetap berasal dari provider sehingga formulir Add user lokal disembunyikan. Akun, password, session, dan grant existing dipertahankan pada upgrade; tidak ada pembuatan ulang admin atau reset password otomatis untuk database yang telah digunakan.
 
 ## Matriks role namespace
 
@@ -105,9 +107,9 @@ Update/delete dan auditnya menggunakan transaksi yang sama. Audit menyimpan hash
 
 ## Pengujian
 
-Test integrasi mencakup bootstrap serentak, upgrade membership dan restart tanpa mengembalikan grant yang dicabut, larangan eskalasi role lewat register, scope spesifik/global/future namespace, gabungan role, write-only/read-only, namespace admin vs super-admin, stale hash, karantina setelah update, delete, disable/reset password, dan admin session yang tetap aktif setelah menambah user.
+Test integrasi mencakup bootstrap startup serentak, upgrade membership dan restart tanpa mengembalikan grant yang dicabut, registrasi ditolak, kewajiban ganti password awal, email opsional, scope spesifik/global/future namespace, gabungan role, write-only/read-only, namespace admin vs super-admin, stale hash, karantina setelah update, delete, disable/reset password, dan admin session yang tetap aktif setelah menambah user.
 
-Smoke test browser `scripts/ui-smoke.cjs` membutuhkan **database kosong** agar akun pertamanya menjadi super-admin. Ia menguji UI menggunakan dua konteks browser terpisah untuk admin dan member, termasuk perubahan role, update, delete, serta session yang dicabut. Jalankan hanya pada database disposable.
+Smoke test browser `scripts/ui-smoke.cjs` membutuhkan **database disposable baru** dengan password admin bootstrap tersedia melalui `BOOTSTRAP_PASSWORD`. Ia menguji UI menggunakan dua konteks browser terpisah untuk admin dan member, termasuk perubahan role, update, delete, serta session yang dicabut. Jalankan hanya pada database disposable.
 
 
 ## Hapus user dan ganti password sendiri

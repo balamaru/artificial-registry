@@ -1,5 +1,6 @@
 // Disposable EMPTY database only. Requires playwright@1.58.2 and Chromium.
 const { chromium, expect } = require('playwright/test');
+const bootstrapLogin = require('./bootstrap-login.cjs');
 (async () => {
  const browser = await chromium.launch({headless:true,args:['--no-sandbox']});
  try {
@@ -10,11 +11,7 @@ const { chromium, expect } = require('playwright/test');
    const response=await page.request.fetch(base+path,{method,data,headers:token?{Authorization:'Bearer '+token}:{'X-Registry-CSRF':'1'}});
    return response;
   };
-  await page.goto(base);
-  await page.locator('#auth-form [name=email]').fill('owner@example.test');
-  await page.locator('#auth-form [name=username]').fill('owner');
-  await page.locator('#auth-form [name=password]').fill('browser-original-password');
-  await page.locator('#auth-submit').click();await expect(page.locator('#workspace')).toBeVisible();
+  await bootstrapLogin(page, base, 'browser-original-password');
   await page.locator('#namespace-form [name=name]').fill('alpha');await page.locator('#namespace-form button').click();await expect(page.locator('#role')).toHaveText('admin');
   await page.locator('#my-account').click();await expect(page.locator('#account-panel')).toBeVisible();
   await page.locator('#token-form [name=name]').fill('parent');
@@ -56,7 +53,7 @@ const { chromium, expect } = require('playwright/test');
    await page.locator('#create-user-form button').click();await expect(page.locator('#users-list')).toContainText(name);
   }
   const operator=await browser.newPage();operator.on('dialog',d=>d.accept());
-  await operator.goto(base);await operator.locator('#auth-toggle').click();
+  await operator.goto(base);
   await operator.locator('#auth-form [name=login]').fill('operator');await operator.locator('#auth-form [name=password]').fill('browser-original-password');
   await operator.locator('#auth-submit').click();await expect(operator.locator('#workspace')).toBeVisible();
   await operator.locator('#manage-users').click();await expect(operator.locator('#create-user-card')).toBeHidden();
@@ -71,7 +68,7 @@ const { chromium, expect } = require('playwright/test');
   await page.locator('#password-form [name=confirmation]').fill('browser-replacement-password');
   await page.locator('#password-form button').click();await expect(page.locator('#auth')).toBeVisible();
   await expect(page.locator('#token-secret')).toHaveValue('');
-  await page.locator('#auth-form [name=login]').fill('owner');await page.locator('#auth-form [name=password]').fill('browser-replacement-password');
+  await page.locator('#auth-form [name=login]').fill('admin');await page.locator('#auth-form [name=password]').fill('browser-replacement-password');
   await page.locator('#auth-submit').click();await expect(page.locator('#workspace')).toBeVisible();
   if(errors.length)throw Error(errors.join('\n'));
   console.log('Account UI passed: root/child tokens, reduced roles, cascade revoke, user-delete, password, mobile.');
